@@ -161,6 +161,7 @@ public sealed class SyncEngine
                 {
                     UpdateStatus(context.Job, "error");
                     _logs.Add($"Sync job {context.Job.ProjectId} failed: {ex.Message}");
+                    _states.LogActivity(context.Job.ProjectId, "ERROR", string.Empty, ex.Message);
                     _logger.LogError(
                         ex,
                         "Sync job {ProjectId} failed. It will be retried on the next interval.",
@@ -238,6 +239,7 @@ public sealed class SyncEngine
                     stored.TrimbleFileId,
                     stored.RelativePath);
                 _logs.Add($"Deleted remote copy of {stored.RelativePath}.");
+                _states.LogActivity(job.ProjectId, "DELETE", stored.RelativePath, $"Deleted remote copy of {stored.RelativePath}.");
             }
 
             _states.Delete(job.ProjectId, stored.RelativePath);
@@ -315,6 +317,7 @@ public sealed class SyncEngine
                 "Conflict on {Path}: local and Trimble both changed. Local network wins; backing up the cloud version.",
                 relative);
             _logs.Add($"Conflict on {relative}: local file kept, cloud copy backed up.");
+            _states.LogActivity(context.Job.ProjectId, "CONFLICT", relative, "Local file kept, cloud copy backed up.");
             if (canPull)
             {
                 await BackupRemoteVersionAsync(context, remote!, cancellationToken).ConfigureAwait(false);
@@ -388,6 +391,7 @@ public sealed class SyncEngine
             uploaded.Id,
             uploaded.VersionId);
         _logs.Add($"Uploaded {relative}.");
+        _states.LogActivity(context.Job.ProjectId, "UPLOAD", relative, $"Uploaded {relative}.");
     }
 
     private async Task DownloadRemoteAsync(
@@ -417,6 +421,7 @@ public sealed class SyncEngine
             remote.Id,
             remote.VersionId);
         _logs.Add($"Downloaded {remote.RelativePath}.");
+        _states.LogActivity(context.Job.ProjectId, "DOWNLOAD", remote.RelativePath, $"Downloaded {remote.RelativePath}.");
     }
 
     private async Task BackupRemoteVersionAsync(

@@ -130,6 +130,62 @@ public sealed class SyncStateRepository : IDisposable
         }
     }
 
+    public void LogActivity(string projectId, string action, string filePath, string details)
+    {
+        lock (_gate)
+        {
+            using var command = _connection.CreateCommand();
+            command.CommandText =
+                """
+                INSERT INTO ActivityLogs (TimestampUtc, ProjectId, Action, FilePath, Details)
+                VALUES ($timestamp, $projectId, $action, $filePath, $details);
+                """;
+            command.Parameters.AddWithValue("$timestamp", ToText(DateTime.UtcNow));
+            command.Parameters.AddWithValue("$projectId", projectId ?? string.Empty);
+            command.Parameters.AddWithValue("$action", action ?? string.Empty);
+            command.Parameters.AddWithValue("$filePath", filePath ?? string.Empty);
+            command.Parameters.AddWithValue("$details", details ?? string.Empty);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public IReadOnlyList<ActivityLog> GetRecentActivities(int limit = 50)
+    {
+        if (limit < 1)
+        {
+            limit = 1;
+        }
+
+        lock (_gate)
+        {
+            var rows = new List<ActivityLog>();
+            using var command = _connection.CreateCommand();
+            command.CommandText =
+                """
+                SELECT Id, TimestampUtc, ProjectId, Action, FilePath, Details
+                FROM ActivityLogs
+                ORDER BY Id DESC
+                LIMIT $limit;
+                """;
+            command.Parameters.AddWithValue("$limit", limit);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add(new ActivityLog
+                {
+                    Id = reader.GetInt64(0),
+                    TimestampUtc = ParseTime(reader.IsDBNull(1) ? null : reader.GetString(1)),
+                    ProjectId = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                    Action = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                    FilePath = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                    Details = reader.IsDBNull(5) ? string.Empty : reader.GetString(5)
+                });
+            }
+
+            return rows;
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -158,6 +214,16 @@ public sealed class SyncStateRepository : IDisposable
             );
             CREATE INDEX IF NOT EXISTS IX_FileStates_TrimbleFileId
                 ON FileStates (TrimbleFileId);
+            CREATE TABLE IF NOT EXISTS ActivityLogs (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                TimestampUtc TEXT NOT NULL,
+                ProjectId TEXT,
+                Action TEXT,
+                FilePath TEXT,
+                Details TEXT
+            );
+            CREATE INDEX IF NOT EXISTS IX_ActivityLogs_TimestampUtc
+                ON ActivityLogs (TimestampUtc);
             """;
         command.ExecuteNonQuery();
     }
