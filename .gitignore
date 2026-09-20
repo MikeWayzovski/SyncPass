@@ -1,0 +1,13 @@
+bin/
+obj/
+data/
+.dotnet/
+.vs/
+.idea/
+*.user
+*.suo
+appsettings.json
+appsettings.Production.json
+.application_credentials
+*.token
+publish/

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="nl" data-theme="modus-modern-light" data-mode="light" class="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trimble Connector</title>
+    <meta name="description" content="Lokale setup wizard voor Trimble Connector" />
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/@trimble-oss/modus-icons@1/dist/modus-outlined/fonts/modus-icons.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/@trimble-oss/modus-icons@1/dist/modus-solid/fonts/modus-icons.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" />
+    <link rel="stylesheet" href="/modus-web-components/modus-icons.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@trimble-oss/moduswebcomponents@1.17.0/modus-wc-styles.css" />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="app-header-copy">
+          <modus-wc-typography size="lg" hierarchy="h1">Trimble Connector</modus-wc-typography>
+          <modus-wc-typography size="sm">
+            Koppel een lokale map aan een Trimble Connect-project. v1.7.1
+          </modus-wc-typography>
+        </div>
+        <div class="app-header-end">
+          <div id="header-profile" class="user-profile hidden">
+            <img id="header-avatar" class="user-avatar" alt="" hidden />
+            <modus-wc-icon id="header-avatar-fallback" name="person" size="sm" decorative></modus-wc-icon>
+            <modus-wc-typography id="header-user-name" size="md"></modus-wc-typography>
+          </div>
+          <modus-wc-button id="settings-btn" size="md" color="tertiary" variant="outlined" shape="square" aria-label="Instellingen">
+            <modus-wc-icon name="settings" size="sm" decorative></modus-wc-icon>
+          </modus-wc-button>
+        </div>
+      </header>
+
+      <modus-wc-stepper id="stepper" orientation="horizontal" interactive></modus-wc-stepper>
+
+      <modus-wc-alert id="page-alert" variant="info" hidden></modus-wc-alert>
+
+      <div id="wizard" class="wizard-stack">
+        <modus-wc-card id="step-auth" bordered padding="compact">
+          <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">1. Authenticatie</modus-wc-typography>
+          <div class="step-body">
+            <div class="status-row">
+              <img id="auth-avatar" class="user-avatar" alt="" hidden />
+              <modus-wc-icon id="auth-avatar-fallback" name="person" size="sm" decorative hidden></modus-wc-icon>
+              <modus-wc-badge id="auth-badge" size="sm" variant="filled">Niet ingelogd</modus-wc-badge>
+              <modus-wc-typography id="auth-user" size="sm"></modus-wc-typography>
+            </div>
+            <modus-wc-button id="login-btn" size="sm" color="primary" variant="filled">
+              <modus-wc-icon name="person" size="xs" decorative></modus-wc-icon>
+              Inloggen met Trimble ID
+            </modus-wc-button>
+          </div>
+        </modus-wc-card>
+
+        <modus-wc-card id="step-project" bordered padding="compact">
+          <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">2. Project</modus-wc-typography>
+          <div class="step-body">
+            <modus-wc-select id="project-select" size="sm" label="Trimble Connect-project"></modus-wc-select>
+          </div>
+        </modus-wc-card>
+
+        <modus-wc-card id="step-folder" bordered padding="compact">
+          <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">3. Cloudmap</modus-wc-typography>
+          <div class="step-body">
+            <div class="folder-toolbar">
+              <modus-wc-typography id="folder-crumb" size="sm">Hoofdmap</modus-wc-typography>
+              <modus-wc-button id="folder-up-btn" size="sm" color="tertiary" variant="outlined">
+                <modus-wc-icon name="arrow_left" size="xs" decorative></modus-wc-icon>
+                Omhoog
+              </modus-wc-button>
+            </div>
+            <div id="folder-list" class="folder-list"></div>
+            <modus-wc-typography id="folder-selected" size="sm"></modus-wc-typography>
+          </div>
+        </modus-wc-card>
+
+        <modus-wc-card id="step-local" bordered padding="compact">
+          <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">4. Lokale map en opties</modus-wc-typography>
+          <div class="step-body">
+            <modus-wc-text-input
+              id="local-path"
+              size="sm"
+              label="Lokale map"
+              placeholder="/home/jack/TestSync"
+              value="/home/jack/TestSync"
+            ></modus-wc-text-input>
+            <modus-wc-select id="direction-select" size="sm" label="Richting"></modus-wc-select>
+            <modus-wc-slider
+              id="interval-slider"
+              size="sm"
+              label="Interval (seconden)"
+              min="15"
+              max="600"
+              step="15"
+            ></modus-wc-slider>
+            <modus-wc-typography id="interval-label" size="sm">60 seconden</modus-wc-typography>
+          </div>
+        </modus-wc-card>
+
+        <div class="action-row">
+          <modus-wc-button id="save-btn" size="sm" color="primary" variant="filled">
+            <modus-wc-icon name="sync" size="xs" decorative></modus-wc-icon>
+            Opslaan en synchronisatie starten
+          </modus-wc-button>
+        </div>
+      </div>
+
+      <modus-wc-card id="log-card" class="log-card" bordered padding="compact">
+        <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Synchronisatiestatus</modus-wc-typography>
+        <div class="step-body">
+          <div class="status-row">
+            <modus-wc-badge id="job-badge" size="sm" variant="outlined">Nog niet gestart</modus-wc-badge>
+            <modus-wc-typography id="job-summary" size="sm"></modus-wc-typography>
+          </div>
+          <ul id="log-list" class="log-list">
+            <li>Wachten op configuratie…</li>
+          </ul>
+        </div>
+      </modus-wc-card>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

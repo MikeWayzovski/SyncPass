@@ -1,0 +1,26 @@
+# Cursor Rules for Trimble Connector (Trimble Connect Local Network Sync Daemon)
+
+## Project Context & Architecture
+- **Project Name:** trimble Connector
+- **Purpose:** Cross-platform headless background daemon (.NET 9) that synchronizes a local network folder (SMB/NFS) with Trimble Connect Cloud using incremental REST API polling and file watching.
+- **Target Framework:** .NET 10 (`Microsoft.NET.Sdk.Worker`)
+- **Deployment Targets:** Windows Executable / Windows Service (`win-x64`) and Linux Daemon / Docker Container (`linux-x64`).
+
+## Coding Standards & Best Practices
+
+### 1. File I/O & Network Drives
+- Use `System.IO.FileSystemWatcher` with a Debouncer mechanism to handle CAD/BIM file saving (`Ctrl+S`).
+- Check file lock availability before attempting uploads (CAD apps hold exclusive locks during save).
+- Compare local file MD5 hashes with Trimble Connect `hash` metadata before transfer to avoid redundant network usage.
+
+### 2. Trimble Connect API Integration
+- Use `HttpClient` / `IHttpClientFactory` with Bearer Token header authentication.
+- Implement incremental sync using Trimble Connect's Object Sync API:
+  - `GET /projects/{projectId}/status` (Sync cursor)
+  - `GET /projects/{projectId}/objects` (Content changes)
+  - `GET /files/fs/{fileId}/downloadurl` (Pre-signed download)
+  - `POST /files/fs/upload` + `/commit` (Multipart/Package upload)
+
+### 3. Service Lifecycle
+- Implement background tasks using `BackgroundService` and `IHostedService`.
+- Ensure cancellation tokens (`CancellationToken`) are respected during file transfers and polling loops.
