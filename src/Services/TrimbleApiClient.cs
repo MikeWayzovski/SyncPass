@@ -141,7 +141,8 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         var transfer = _httpClientFactory.CreateClient("Transfer");
         using var response = await transfer.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        await ThrowIfUnsuccessfulAsync(response, HttpMethod.Get, $"files/fs/{fileId}/download", cancellationToken)
+            .ConfigureAwait(false);
 
         await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
         await using (var output = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
@@ -209,11 +210,8 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         using var content = new StreamContent(fileStream);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         using var put = await transfer.PutAsync(uploadUrl, content, cancellationToken).ConfigureAwait(false);
-        if (!put.IsSuccessStatusCode)
-        {
-            var error = await put.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            throw new HttpRequestException($"Pre-signed upload failed with HTTP {(int)put.StatusCode}: {error}");
-        }
+        await ThrowIfUnsuccessfulAsync(put, HttpMethod.Put, "files/fs/upload", cancellationToken)
+            .ConfigureAwait(false);
 
         var committed = await SendJsonAsync<ConnectFile>(
                 HttpMethod.Post,
@@ -488,7 +486,8 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
             return;
         }
 
-        response.EnsureSuccessStatusCode();
+        await ThrowIfUnsuccessfulAsync(response, HttpMethod.Delete, $"files/{fileId}", cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private Task<List<SyncObject>> ListFolderItemsAsync(string folderId, CancellationToken cancellationToken) =>
@@ -564,10 +563,10 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         ApiVersion version)
     {
         using var response = await SendAsync(method, relativeUrl, null, cancellationToken, version).ConfigureAwait(false);
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var payload = await ReadResponseBodyAsync(response, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new HttpRequestException($"Trimble Connect {method} {relativeUrl} failed with HTTP {(int)response.StatusCode}.");
+            ThrowApiError(method, relativeUrl, response.StatusCode, payload);
         }
 
         if (string.IsNullOrWhiteSpace(payload))
@@ -587,16 +586,11 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         ApiVersion version)
     {
         using var response = await SendAsync(method, relativeUrl, body, cancellationToken, version).ConfigureAwait(false);
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var payload = await ReadResponseBodyAsync(response, cancellationToken).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogError(
-                "Trimble Connect {Method} {Url} failed with {StatusCode}.",
-                method,
-                relativeUrl,
-                (int)response.StatusCode);
-            throw new HttpRequestException($"Trimble Connect {method} {relativeUrl} failed with HTTP {(int)response.StatusCode}.");
+            ThrowApiError(method, relativeUrl, response.StatusCode, payload);
         }
 
         if (string.IsNullOrWhiteSpace(payload))
@@ -629,7 +623,15 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
                 "application/json");
         }
 
-        var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw WrapTransportError(method, relativeUrl, ex);
+        }
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
@@ -645,9 +647,66 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
                     "application/json");
             }
 
-            response = await client.SendAsync(retry, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                response = await client.SendAsync(retry, cancellationToken).ConfigureAwait(false);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw WrapTransportError(method, relativeUrl, ex);
+            }
         }
 
         return response;
+    }
+
+    private async Task ThrowIfUnsuccessfulAsync(
+        HttpResponseMessage response,
+        HttpMethod method,
+        string relativeUrl,
+        CancellationToken cancellationToken)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var body = await ReadResponseBodyAsync(response, cancellationToken).ConfigureAwait(false);
+        ThrowApiError(method, relativeUrl, response.StatusCode, body);
+    }
+
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private void ThrowApiError(HttpMethod method, string relativeUrl, HttpStatusCode statusCode, string? body)
+    {
+        var message = FormatApiError(method, relativeUrl, statusCode, body);
+        _logger.LogError("{Error}", message);
+        throw new HttpRequestException(message, inner: null, statusCode);
+    }
+
+    private HttpRequestException WrapTransportError(HttpMethod method, string relativeUrl, HttpRequestException ex)
+    {
+        var message = $"Trimble Connect API error [{method.Method} {relativeUrl}]: {ex.Message}";
+        _logger.LogError(ex, "{Error}", message);
+        return new HttpRequestException(message, ex, ex.StatusCode);
+    }
+
+    private static string FormatApiError(HttpMethod method, string relativeUrl, HttpStatusCode statusCode, string? body)
+    {
+        var payload = string.IsNullOrWhiteSpace(body) ? "(empty)" : body.Trim();
+        return $"Trimble Connect API error [{method.Method} {relativeUrl}]: HTTP {(int)statusCode} - Response Body: {payload}";
+    }
+
+    private static async Task<string> ReadResponseBodyAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return $"(could not read response body: {ex.Message})";
+        }
     }
 }
