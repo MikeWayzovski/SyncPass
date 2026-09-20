@@ -8,7 +8,7 @@ body {
 }
 
 .app-shell {
-  max-width: 56rem;
+  max-width: 72rem;
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;
   display: flex;
@@ -117,6 +117,20 @@ body {
   gap: 0.5rem;
 }
 
-.hidden {
-  display: none !important;
+modus-wc-tabs {
+  width: 100%;
+}
+
+.table-wrap {
+  min-width: 0;
+  overflow: auto;
+}
+
+.app-shell-wide {
+  max-width: 80rem;
+}
+
+.table-wrap {
+  min-width: 0;
+  overflow: auto;
 }

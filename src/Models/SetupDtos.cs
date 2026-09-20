@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using TrimbleConnector.Config;
 
 namespace TrimbleConnector.Models;
 
@@ -89,6 +90,8 @@ public sealed class SetupUserDto
 
 public sealed class SetupJobStatus
 {
+    public string JobId { get; set; } = string.Empty;
+
     public string ProjectId { get; set; } = string.Empty;
 
     public string? RemoteFolderId { get; set; }
@@ -100,6 +103,28 @@ public sealed class SetupJobStatus
     public int SyncIntervalSeconds { get; set; }
 
     public string State { get; set; } = "idle";
+}
+
+public sealed class ProvisionProjectRequest
+{
+    public string TemplateProjectId { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    public string LocalFolderPath { get; set; } = string.Empty;
+
+    public List<FolderMapping>? FolderMappings { get; set; }
+}
+
+public sealed class SaveConfigRequest
+{
+    public ProjectProvisioningOptions? ProjectProvisioning { get; set; }
+
+    public List<SharedSyncRule>? SharedSyncRules { get; set; }
+
+    public List<SyncJobOptions>? SyncJobs { get; set; }
 }
 
 public sealed class SetupProjectDto
@@ -133,6 +158,8 @@ public sealed class SaveSetupRequest
     public int SyncIntervalSeconds { get; set; } = 60;
 
     public string Direction { get; set; } = "TwoWay";
+
+    public List<FolderMapping>? FolderMappings { get; set; }
 }
 
 public sealed class LoginUrlResponse

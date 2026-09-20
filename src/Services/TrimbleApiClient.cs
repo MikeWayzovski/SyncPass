@@ -62,6 +62,22 @@ public interface ITrimbleApiClient
     Task<IReadOnlyList<ConnectProject>> GetProjectsAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ConnectFolder>> ListSubfoldersAsync(string folderId, CancellationToken cancellationToken);
+
+    Task<CloneOperation> CloneProjectAsync(
+        string sourceProjectId,
+        string name,
+        string? description,
+        CancellationToken cancellationToken);
+
+    Task<CloneOperation> GetCloneStatusAsync(string cloneId, CancellationToken cancellationToken);
+
+    Task<ConnectProject> WaitForCloneAsync(string cloneId, CancellationToken cancellationToken);
+
+    Task<ConnectProject> CreateProjectAsync(
+        string name,
+        string? description,
+        string? location,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -259,6 +275,143 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
 
     public Task<ConnectProject> GetProjectAsync(string projectId, CancellationToken cancellationToken) =>
         SendJsonAsync<ConnectProject>(HttpMethod.Get, $"projects/{projectId}", null, cancellationToken, ApiVersion.V21);
+
+    public async Task<CloneOperation> CloneProjectAsync(
+        string sourceProjectId,
+        string name,
+        string? description,
+        CancellationToken cancellationToken)
+    {
+        var body = new
+        {
+            projectId = sourceProjectId,
+            name,
+            description,
+            include = new[] { "folders", "groups", "settings", "folderPermissions" }
+        };
+
+        using var response = await SendAsync(HttpMethod.Post, "projects/clones", body, cancellationToken, ApiVersion.V21)
+            .ConfigureAwait(false);
+        var payload = await ReadResponseBodyAsync(response, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            ThrowApiError(
+                HttpMethod.Post,
+                "projects/clones",
+                response.StatusCode,
+                payload,
+                JsonSerializer.Serialize(body, ApiJsonOptions));
+        }
+
+        return ParseCloneOperation(payload);
+    }
+
+    public async Task<CloneOperation> GetCloneStatusAsync(string cloneId, CancellationToken cancellationToken)
+    {
+        var payload = await SendRawJsonAsync(HttpMethod.Get, $"projects/clones/{cloneId}", cancellationToken, ApiVersion.V21)
+            .ConfigureAwait(false);
+        return ParseCloneOperation(payload.GetRawText());
+    }
+
+    public async Task<ConnectProject> WaitForCloneAsync(string cloneId, CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(3);
+        CloneOperation? last = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            last = await GetCloneStatusAsync(cloneId, cancellationToken).ConfigureAwait(false);
+            if (last.IsFailed)
+            {
+                throw new InvalidOperationException(last.Error ?? $"Project clone {cloneId} failed with status {last.Status}.");
+            }
+
+            if (last.IsDone)
+            {
+                var projectId = last.ResolvedProjectId;
+                if (!string.IsNullOrWhiteSpace(projectId))
+                {
+                    return await GetProjectAsync(projectId, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (last.Project is not null && !string.IsNullOrWhiteSpace(last.Project.Id))
+                {
+                    return last.Project;
+                }
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+        }
+
+        throw new TimeoutException($"Project clone {cloneId} did not finish in time. Last status: {last?.Status ?? "unknown"}.");
+    }
+
+    public Task<ConnectProject> CreateProjectAsync(
+        string name,
+        string? description,
+        string? location,
+        CancellationToken cancellationToken)
+    {
+        var body = new
+        {
+            name,
+            description,
+            location
+        };
+
+        return SendJsonAsync<ConnectProject>(HttpMethod.Post, "projects", body, cancellationToken, ApiVersion.V21);
+    }
+
+    private static CloneOperation ParseCloneOperation(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return new CloneOperation();
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        var operation = new CloneOperation
+        {
+            Id = ReadString(root, "id", "cloneId", "operationId") ?? string.Empty,
+            Status = ReadString(root, "status", "state") ?? string.Empty,
+            ProjectId = ReadString(root, "projectId", "clonedProjectId", "targetProjectId", "newProjectId"),
+            Error = ReadString(root, "error", "message", "errorMessage")
+        };
+
+        if (root.TryGetProperty("project", out var projectEl) && projectEl.ValueKind == JsonValueKind.Object)
+        {
+            operation.Project = projectEl.Deserialize<ConnectProject>(ApiJsonOptions);
+            operation.ProjectId ??= operation.Project?.Id;
+        }
+
+        if (string.IsNullOrWhiteSpace(operation.Status)
+            && !string.IsNullOrWhiteSpace(ReadString(root, "id"))
+            && root.TryGetProperty("name", out _))
+        {
+            operation.Project = root.Deserialize<ConnectProject>(ApiJsonOptions);
+            operation.ProjectId = operation.Project?.Id;
+            operation.Status = "DONE";
+        }
+
+        return operation;
+    }
+
+    private static string? ReadString(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String)
+            {
+                var text = value.GetString();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    return text;
+                }
+            }
+        }
+
+        return null;
+    }
 
     public Task<string> ResolveOrCreateFolderAsync(
         string projectId,

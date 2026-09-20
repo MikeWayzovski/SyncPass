@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="nl" data-theme="modus-modern-light" data-mode="light" class="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Activiteit — Trimble Connector</title>
+    <meta name="description" content="Activiteitenmonitor voor Trimble Connector" />
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/@trimble-oss/modus-icons@1/dist/modus-outlined/fonts/modus-icons.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/@trimble-oss/modus-icons@1/dist/modus-solid/fonts/modus-icons.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" />
+    <link rel="stylesheet" href="/modus-web-components/modus-icons.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@trimble-oss/moduswebcomponents@1.17.0/modus-wc-styles.css" />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="app-shell app-shell-wide">
+      <header class="app-header">
+        <div class="app-header-copy">
+          <modus-wc-typography size="lg" hierarchy="h1">Activiteit</modus-wc-typography>
+          <modus-wc-typography size="sm">
+            Laatste 50 synchronisatieacties. Vernieuwt automatisch. v2.2.0
+          </modus-wc-typography>
+        </div>
+        <div class="app-header-end">
+          <modus-wc-badge id="refresh-badge" size="sm" variant="outlined">Wachten…</modus-wc-badge>
+          <modus-wc-button id="setup-btn" size="md" color="tertiary" variant="outlined">
+            <modus-wc-icon name="settings" size="sm" decorative></modus-wc-icon>
+            Instellingen
+          </modus-wc-button>
+        </div>
+      </header>
+
+      <modus-wc-alert id="page-alert" variant="info" hidden></modus-wc-alert>
+
+      <modus-wc-card bordered padding="compact">
+        <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Activiteitenlog</modus-wc-typography>
+        <div class="step-body table-wrap">
+          <modus-wc-typography id="empty-state" size="sm">Nog geen activiteit.</modus-wc-typography>
+          <modus-wc-table
+            id="activity-table"
+            zebra
+            hover
+            density="compact"
+            selectable="none"
+            caption="Recente synchronisatieactiviteit"
+          ></modus-wc-table>
+        </div>
+      </modus-wc-card>
+    </main>
+    <script type="module" src="/activity.js"></script>
+  </body>
+</html>

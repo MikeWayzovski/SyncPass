@@ -56,8 +56,10 @@ IHost host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<SyncJobStore>();
         services.AddSingleton<SyncLogBuffer>();
         services.AddSingleton<SyncStateRepository>();
+        services.AddSingleton<ProjectProvisioningService>();
         services.AddSingleton<SyncEngine>();
         services.AddSingleton<SetupApi>();
+        // SetupWebServer hosts http://localhost:5000 including GET /api/activity and /activity.
         services.AddHostedService<SetupWebServer>();
         services.AddHostedService<Worker>();
     })

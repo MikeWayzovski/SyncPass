@@ -1,10 +1,15 @@
+using System.Text.Json.Serialization;
 using TrimbleConnector.Models;
 
 namespace TrimbleConnector.Config;
 
 public sealed class SyncJobOptions
 {
+    public string JobId { get; set; } = string.Empty;
+
     public string ProjectId { get; set; } = string.Empty;
+
+    public string LocalProjectRoot { get; set; } = string.Empty;
 
     public string LocalFolderPath { get; set; } = string.Empty;
 
@@ -12,12 +17,21 @@ public sealed class SyncJobOptions
 
     public string RemoteFolderId { get; set; } = string.Empty;
 
+    public List<FolderMapping> FolderMappings { get; set; } = [];
+
     public int SyncIntervalSeconds { get; set; } = 300;
 
     public SyncDirection Direction { get; set; } = SyncDirection.TwoWay;
 
+    [JsonIgnore]
     public TimeSpan Interval => TimeSpan.FromSeconds(Math.Max(15, SyncIntervalSeconds));
 
+    [JsonIgnore]
     public string? EffectiveRemoteFolderId =>
         string.IsNullOrWhiteSpace(RemoteFolderId) ? null : RemoteFolderId.Trim();
+
+    [JsonIgnore]
+    public string EffectiveLocalRoot =>
+        !string.IsNullOrWhiteSpace(LocalProjectRoot) ? LocalProjectRoot.Trim()
+        : LocalFolderPath?.Trim() ?? string.Empty;
 }

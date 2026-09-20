@@ -18,6 +18,7 @@ public sealed class SyncEngine
     private readonly SyncJobStore _jobs;
     private readonly SyncLogBuffer _logs;
     private readonly SyncStateRepository _states;
+    private readonly ProjectProvisioningService _provisioning;
     private readonly IHostEnvironment _environment;
     private readonly ILogger<SyncEngine> _logger;
     private readonly object _statusLock = new();
@@ -31,6 +32,7 @@ public sealed class SyncEngine
         SyncJobStore jobs,
         SyncLogBuffer logs,
         SyncStateRepository states,
+        ProjectProvisioningService provisioning,
         IHostEnvironment environment,
         ILogger<SyncEngine> logger)
     {
@@ -40,6 +42,7 @@ public sealed class SyncEngine
         _jobs = jobs;
         _logs = logs;
         _states = states;
+        _provisioning = provisioning;
         _environment = environment;
         _logger = logger;
     }
@@ -114,15 +117,29 @@ public sealed class SyncEngine
                 _watcher.Watch(job.LocalFolderPath);
             }
 
+            if (!string.IsNullOrWhiteSpace(job.LocalProjectRoot)
+                && !string.Equals(job.LocalProjectRoot, job.LocalFolderPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _watcher.Watch(job.LocalProjectRoot);
+            }
+
             contexts.Add(context);
             snapshot.Add(ToStatus(job, "ready"));
             _logger.LogInformation(
-                "Registered sync job {ProjectId} ({Direction}) {Local} <-> folder {RemoteFolder}.",
+                "Registered sync job {JobId} {ProjectId} ({Direction}) {Local} <-> folder {RemoteFolder}.",
+                job.JobId,
                 job.ProjectId,
                 job.Direction,
                 job.LocalFolderPath,
                 job.EffectiveRemoteFolderId ?? job.RemoteFolderPath);
-            _logs.Add($"Sync job ready for project {job.ProjectId}.");
+            _logs.Add($"Sync job ready for project {job.ProjectId} ({job.LocalFolderPath}).");
+        }
+
+        var watchRoot = _jobs.GetConfig().ProjectProvisioning.WatchRoot;
+        if (!string.IsNullOrWhiteSpace(watchRoot))
+        {
+            Directory.CreateDirectory(watchRoot);
+            _watcher.Watch(watchRoot);
         }
 
         lock (_statusLock)
@@ -137,6 +154,12 @@ public sealed class SyncEngine
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            if (await _provisioning.ScanTriggersAsync(cancellationToken).ConfigureAwait(false))
+            {
+                ReloadJobs();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             var wait = TimeSpan.FromSeconds(300);
 
             foreach (var context in contexts)
@@ -186,7 +209,14 @@ public sealed class SyncEngine
             ?? await _api.ResolveOrCreateFolderAsync(job.ProjectId, job.RemoteFolderPath, cancellationToken)
                 .ConfigureAwait(false);
 
-        _watcher.Drain();
+        var changes = _watcher.Drain();
+        foreach (var change in changes.Where(item => ProjectProvisioningService.IsTriggerFile(item.FullPath)))
+        {
+            if (await _provisioning.ProcessTriggerFileAsync(change.FullPath, cancellationToken).ConfigureAwait(false))
+            {
+                ReloadJobs();
+            }
+        }
 
         var remoteFiles = await LoadRemoteFilesAsync(context, remoteFolderId, cancellationToken)
             .ConfigureAwait(false);
@@ -214,7 +244,7 @@ public sealed class SyncEngine
                 .ConfigureAwait(false);
         }
 
-        foreach (var stored in _states.GetAll(job.ProjectId))
+        foreach (var stored in _states.GetAll(StateScope(job)))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (seen.Contains(stored.RelativePath))
@@ -242,7 +272,7 @@ public sealed class SyncEngine
                 _states.LogActivity(job.ProjectId, "DELETE", stored.RelativePath, $"Deleted remote copy of {stored.RelativePath}.");
             }
 
-            _states.Delete(job.ProjectId, stored.RelativePath);
+            _states.Delete(StateScope(job), stored.RelativePath);
             deletedLocally.Add(stored.RelativePath);
         }
 
@@ -253,7 +283,7 @@ public sealed class SyncEngine
                 cancellationToken.ThrowIfCancellationRequested();
                 if (seen.Contains(remote.RelativePath)
                     || deletedLocally.Contains(remote.RelativePath)
-                    || _states.Get(job.ProjectId, remote.RelativePath) is not null)
+                    || _states.Get(StateScope(job), remote.RelativePath) is not null)
                 {
                     continue;
                 }
@@ -284,7 +314,7 @@ public sealed class SyncEngine
 
         var localHash = await ChecksumService.ComputeSha256Async(localPath, cancellationToken)
             .ConfigureAwait(false);
-        var stored = _states.Get(context.Job.ProjectId, relative);
+        var stored = _states.Get(StateScope(context.Job), relative);
         var localChanged = stored is null
             || !ChecksumService.EqualsOrdinalIgnoreCase(stored.LocalHash, localHash);
         var remoteChanged = RemoteVersionChanged(stored, remote);
@@ -384,7 +414,7 @@ public sealed class SyncEngine
             .ConfigureAwait(false);
 
         SaveFileState(
-            context.Job.ProjectId,
+            StateScope(context.Job),
             relative,
             localPath,
             localHash,
@@ -414,7 +444,7 @@ public sealed class SyncEngine
         var localHash = await ChecksumService.ComputeSha256Async(localPath, cancellationToken)
             .ConfigureAwait(false);
         SaveFileState(
-            context.Job.ProjectId,
+            StateScope(context.Job),
             remote.RelativePath,
             localPath,
             localHash,
@@ -598,7 +628,11 @@ public sealed class SyncEngine
     {
         lock (_statusLock)
         {
-            var match = _status.FirstOrDefault(item => item.ProjectId == job.ProjectId);
+            var match = _status.FirstOrDefault(item =>
+                (!string.IsNullOrWhiteSpace(job.JobId) && item.JobId == job.JobId)
+                || (item.ProjectId == job.ProjectId
+                    && item.LocalFolderPath == job.LocalFolderPath
+                    && item.RemoteFolderId == job.EffectiveRemoteFolderId));
             if (match is not null)
             {
                 match.State = state;
@@ -608,6 +642,7 @@ public sealed class SyncEngine
 
     private static SetupJobStatus ToStatus(SyncJobOptions job, string state) => new()
     {
+        JobId = job.JobId,
         ProjectId = job.ProjectId,
         RemoteFolderId = job.EffectiveRemoteFolderId,
         LocalFolderPath = job.LocalFolderPath,
@@ -640,9 +675,20 @@ public sealed class SyncEngine
 
     private string StatePath(SyncJobOptions job)
     {
-        var safeId = string.Concat(job.ProjectId.Where(char.IsLetterOrDigit));
+        var key = string.IsNullOrWhiteSpace(job.JobId)
+            ? job.ProjectId
+            : job.JobId;
+        var safeId = string.Concat(key.Where(char.IsLetterOrDigit));
+        if (string.IsNullOrEmpty(safeId))
+        {
+            safeId = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..12];
+        }
+
         return Path.Combine(_environment.ContentRootPath, "data", $"sync-state-{safeId}.json");
     }
+
+    private static string StateScope(SyncJobOptions job) =>
+        string.IsNullOrWhiteSpace(job.JobId) ? job.ProjectId : $"{job.ProjectId}::{job.JobId}";
 
     private SyncState LoadState(SyncJobOptions job)
     {
@@ -673,7 +719,7 @@ public sealed class SyncEngine
 
     private static IEnumerable<string> EnumerateLocalFiles(string root) =>
         Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-            .Where(path => !LocalFileWatcher.ShouldIgnore(path));
+            .Where(path => !LocalFileWatcher.ShouldIgnore(path) && !ProjectProvisioningService.IsTriggerFile(path));
 
     private static string NormalizeRemotePath(string path) =>
         "/" + string.Join('/', (path ?? "/").Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries));

@@ -12,19 +12,25 @@ public sealed class SetupApi
     private readonly SyncJobStore _jobs;
     private readonly SyncEngine _engine;
     private readonly SyncLogBuffer _logs;
+    private readonly SyncStateRepository _states;
+    private readonly ProjectProvisioningService _provisioning;
 
     public SetupApi(
         AuthSetupHelper auth,
         ITrimbleApiClient api,
         SyncJobStore jobs,
         SyncEngine engine,
-        SyncLogBuffer logs)
+        SyncLogBuffer logs,
+        SyncStateRepository states,
+        ProjectProvisioningService provisioning)
     {
         _auth = auth;
         _api = api;
         _jobs = jobs;
         _engine = engine;
         _logs = logs;
+        _states = states;
+        _provisioning = provisioning;
     }
 
     public async Task<SetupStatusResponse> GetStatusAsync(CancellationToken cancellationToken)
@@ -64,6 +70,7 @@ public sealed class SetupApi
                 ? _engine.CurrentJobs
                 : _jobs.GetJobs().Select(job => new SetupJobStatus
                 {
+                    JobId = job.JobId,
                     ProjectId = job.ProjectId,
                     RemoteFolderId = job.EffectiveRemoteFolderId,
                     LocalFolderPath = job.LocalFolderPath,
@@ -77,6 +84,8 @@ public sealed class SetupApi
 
     public Task<(byte[] Data, string ContentType)?> GetAvatarAsync(CancellationToken cancellationToken) =>
         _api.DownloadUserThumbnailAsync(cancellationToken);
+
+    public IReadOnlyList<ActivityLog> GetRecentActivities() => _states.GetRecentActivities(50);
 
     public LoginUrlResponse GetLoginUrl() => new() { Url = _auth.BuildAuthorizeUrl() };
 
@@ -120,13 +129,28 @@ public sealed class SetupApi
         }).ToList();
     }
 
+    public ConnectorSyncConfig GetConfig() => _jobs.GetConfig();
+
+    public void SaveConfig(ConnectorSyncConfig config)
+    {
+        _jobs.SaveConfig(config);
+        _engine.ReloadJobs();
+    }
+
+    public async Task<ConnectProject> ProvisionAsync(ProvisionProjectRequest request, CancellationToken cancellationToken)
+    {
+        EnsureAuthenticated();
+        var project = await _provisioning.ProvisionFromUiAsync(request, cancellationToken).ConfigureAwait(false);
+        _engine.ReloadJobs();
+        return project;
+    }
+
     public void Save(SaveSetupRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.ProjectId)
-            || string.IsNullOrWhiteSpace(request.RemoteFolderId)
             || string.IsNullOrWhiteSpace(request.LocalFolderPath))
         {
-            throw new ArgumentException("projectId, remoteFolderId, and localFolderPath are required.");
+            throw new ArgumentException("projectId and localFolderPath are required.");
         }
 
         if (!Enum.TryParse<SyncDirection>(request.Direction, ignoreCase: true, out var direction))
@@ -137,13 +161,31 @@ public sealed class SetupApi
         var interval = request.SyncIntervalSeconds < 15 ? 15 : request.SyncIntervalSeconds;
         Directory.CreateDirectory(request.LocalFolderPath);
 
-        _jobs.Save(new SyncJobOptions
+        var mappings = request.FolderMappings is { Count: > 0 }
+            ? request.FolderMappings
+            : string.IsNullOrWhiteSpace(request.RemoteFolderId)
+                ? []
+                : [new FolderMapping
+                {
+                    LocalSubPath = string.Empty,
+                    RemoteFolderId = request.RemoteFolderId.Trim(),
+                    Direction = direction
+                }];
+
+        if (mappings.Count == 0)
+        {
+            throw new ArgumentException("remoteFolderId or folderMappings are required.");
+        }
+
+        _jobs.UpsertProjectJob(new SyncJobOptions
         {
             ProjectId = request.ProjectId.Trim(),
-            RemoteFolderId = request.RemoteFolderId.Trim(),
+            RemoteFolderId = mappings[0].RemoteFolderId,
+            LocalProjectRoot = request.LocalFolderPath.Trim(),
             LocalFolderPath = request.LocalFolderPath.Trim(),
             SyncIntervalSeconds = interval,
-            Direction = direction
+            Direction = direction,
+            FolderMappings = mappings
         });
 
         _engine.ReloadJobs();

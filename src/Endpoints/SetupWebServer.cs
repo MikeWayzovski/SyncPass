@@ -127,6 +127,46 @@ public sealed class SetupWebServer : BackgroundService
                 return;
             }
 
+            if (request.HttpMethod == "GET" && path == "/api/setup/config")
+            {
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, _api.GetConfig(), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "PUT" && path == "/api/setup/config")
+            {
+                using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
+                var body = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                var payload = JsonSerializer.Deserialize<ConnectorSyncConfig>(body, JsonDefaults.Serializer)
+                    ?? throw new ArgumentException("Invalid JSON payload.");
+                _api.SaveConfig(payload);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { saved = true }, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "POST" && path == "/api/setup/provision")
+            {
+                using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
+                var body = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                var payload = JsonSerializer.Deserialize<ProvisionProjectRequest>(body, JsonDefaults.Serializer)
+                    ?? throw new ArgumentException("Invalid JSON payload.");
+                var project = await _api.ProvisionAsync(payload, cancellationToken).ConfigureAwait(false);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, project, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "GET" && path == "/api/activity")
+            {
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, _api.GetRecentActivities(), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "GET" && path == "/activity")
+            {
+                await ServeStaticAsync(context.Response, "/activity.html", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             if (request.HttpMethod == "GET" && path == "/callback")
             {
                 await HandleCallbackAsync(context, cancellationToken).ConfigureAwait(false);
