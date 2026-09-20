@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using TrimbleConnector.Config;
 using TrimbleConnector.Models;
 
@@ -77,6 +78,13 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
 
     private static readonly TimeSpan UserCacheTtl = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan UserErrorBackoff = TimeSpan.FromSeconds(30);
+    private static readonly JsonSerializerOptions ApiJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.Strict
+    };
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ITrimbleAuthService _auth;
@@ -197,15 +205,14 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
 
         var init = await SendJsonAsync<UploadInitResponse>(
                 HttpMethod.Post,
-                "files/fs/initiate",
+                $"projects/{Uri.EscapeDataString(projectId)}/files/fs/initiate",
                 new UploadInitRequest
                 {
-                    ProjectId = projectId,
-                    ParentId = parentFolderId,
-                    ParentType = "FOLDER",
                     Name = remoteName,
                     Size = info.Length,
-                    FileId = existingFileId
+                    ParentId = parentFolderId,
+                    ParentType = "FOLDER",
+                    FileId = string.IsNullOrWhiteSpace(existingFileId) ? null : existingFileId
                 },
                 cancellationToken,
                 ApiVersion.V20)
@@ -231,12 +238,11 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
 
         var committed = await SendJsonAsync<ConnectFile>(
                 HttpMethod.Post,
-                "files/fs/commit",
+                $"projects/{Uri.EscapeDataString(projectId)}/files/fs/commit",
                 new UploadCommitRequest
                 {
                     UploadId = init.UploadId,
-                    ProjectId = projectId,
-                    FileId = init.FileId ?? existingFileId
+                    FileId = FirstNonEmpty(init.FileId, existingFileId)
                 },
                 cancellationToken,
                 ApiVersion.V20)
@@ -637,7 +643,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            var requestJson = body is null ? null : JsonSerializer.Serialize(body, JsonDefaults.Serializer);
+            var requestJson = body is null ? null : JsonSerializer.Serialize(body, ApiJsonOptions);
             ThrowApiError(method, relativeUrl, response.StatusCode, payload, requestJson);
         }
 
@@ -646,7 +652,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
             return Activator.CreateInstance<T>();
         }
 
-        return JsonSerializer.Deserialize<T>(payload, JsonDefaults.Serializer)
+        return JsonSerializer.Deserialize<T>(payload, ApiJsonOptions)
             ?? throw new InvalidOperationException($"Could not deserialize {typeof(T).Name} from {relativeUrl}.");
     }
 
@@ -666,7 +672,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         if (body is not null)
         {
             request.Content = new StringContent(
-                JsonSerializer.Serialize(body, JsonDefaults.Serializer),
+                JsonSerializer.Serialize(body, ApiJsonOptions),
                 Encoding.UTF8,
                 "application/json");
         }
@@ -690,7 +696,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
             if (body is not null)
             {
                 retry.Content = new StringContent(
-                    JsonSerializer.Serialize(body, JsonDefaults.Serializer),
+                    JsonSerializer.Serialize(body, ApiJsonOptions),
                     Encoding.UTF8,
                     "application/json");
             }
@@ -777,5 +783,18 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         {
             return $"(could not read response body: {ex.Message})";
         }
+    }
+
+    private static string? FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 }

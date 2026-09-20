@@ -82,17 +82,19 @@ public sealed class DownloadUrlResponse
 
 public sealed class UploadInitRequest
 {
-    public string ProjectId { get; set; } = string.Empty;
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
 
+    [JsonPropertyName("size")]
+    public long Size { get; set; }
+
+    [JsonPropertyName("parentId")]
     public string ParentId { get; set; } = string.Empty;
 
     [JsonPropertyName("parentType")]
     public string ParentType { get; set; } = "FOLDER";
 
-    public string Name { get; set; } = string.Empty;
-
-    public long Size { get; set; }
-
+    [JsonPropertyName("fileId")]
     public string? FileId { get; set; }
 }
 
@@ -115,9 +117,9 @@ public sealed class UploadInitResponse
 
 public sealed class UploadCommitRequest
 {
+    [JsonPropertyName("uploadId")]
     public string? UploadId { get; set; }
 
-    public string? ProjectId { get; set; }
-
+    [JsonPropertyName("fileId")]
     public string? FileId { get; set; }
 }
