@@ -158,3 +158,42 @@ body {
 .wizard-panel.hidden {
   display: none !important;
 }
+
+.map-list,
+.exec-feed,
+.summary-list,
+.browse-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.map-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--modus-wc-color-base-100, #fff);
+  border: 1px solid var(--modus-wc-color-base-200, #e0e1e2);
+  border-radius: 0.25rem;
+}
+
+.browse-list {
+  max-height: 16rem;
+  overflow: auto;
+}
+
+.exec-feed {
+  max-height: 16rem;
+  overflow: auto;
+}
+
+.summary-list {
+  gap: 0.35rem;
+}

@@ -162,9 +162,9 @@ public sealed class SetupApi
 
     public SyncJobOptions Save(SaveSetupRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.ProjectId) && string.IsNullOrWhiteSpace(request.ProjectName))
+        if (string.IsNullOrWhiteSpace(request.ProjectId))
         {
-            throw new ArgumentException("projectName is required.");
+            throw new ArgumentException("projectId is required. Select a Trimble Connect project.");
         }
 
         if (string.IsNullOrWhiteSpace(request.LocalFolderPath))
@@ -222,6 +222,28 @@ public sealed class SetupApi
     }
 
     public LocalTreeResponse ScanLocalTree(string? path) => _inventory.ScanLocal(path);
+
+    public BrowseResponse BrowseLocal(string? path) => _inventory.Browse(path);
+
+    public async Task<SetupFolderDto> CreateFolderAsync(CreateFolderRequest request, CancellationToken cancellationToken)
+    {
+        EnsureAuthenticated();
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            throw new ArgumentException("folder name is required.");
+        }
+
+        var project = await _api.ResolveProjectAsync(request.ProjectId, request.ProjectName, cancellationToken)
+            .ConfigureAwait(false);
+        var path = RemotePath.Combine(request.ParentPath, request.Name.Trim());
+        var id = await _api.ResolveOrCreateFolderAsync(project.Id, path, cancellationToken).ConfigureAwait(false);
+        return new SetupFolderDto
+        {
+            Id = id,
+            Name = request.Name.Trim(),
+            Path = path
+        };
+    }
 
     public Task<InventoryResponse> InventoryAsync(InventoryRequest request, CancellationToken cancellationToken)
     {

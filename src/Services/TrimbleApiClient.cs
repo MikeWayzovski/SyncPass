@@ -51,6 +51,12 @@ public interface ITrimbleApiClient
         string? startFolderId,
         CancellationToken cancellationToken);
 
+    Task<ConnectFolder> CreateFolderAsync(
+        string projectId,
+        string parentFolderId,
+        string name,
+        CancellationToken cancellationToken);
+
     Task<string?> TryResolveFolderAsync(
         string projectId,
         string remoteFolderPath,
@@ -89,7 +95,7 @@ public interface ITrimbleApiClient
 
 /// <summary>
 /// Thin HttpClient wrapper for Trimble Connect Core REST:
-/// v2.0 Object Sync / files / users, v2.1 projects and folders.
+/// v2.0 Object Sync / files / folders, v2.1 projects.
 /// </summary>
 public sealed class TrimbleApiClient : ITrimbleApiClient
 {
@@ -479,18 +485,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         string? startFolderId,
         CancellationToken cancellationToken)
     {
-        string currentId;
-        if (!string.IsNullOrWhiteSpace(startFolderId))
-        {
-            currentId = startFolderId;
-        }
-        else
-        {
-            var project = await ResolveProjectAsync(projectId, null, cancellationToken).ConfigureAwait(false);
-            currentId = project.EffectiveRootId
-                ?? throw new InvalidOperationException($"Project {projectId} did not return a root folder id.");
-        }
-
+        var currentId = await ResolveRootFolderIdAsync(projectId, startFolderId, cancellationToken).ConfigureAwait(false);
         var segments = (remoteFolderPath ?? "/")
             .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -506,25 +501,77 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
                 continue;
             }
 
-            var created = await SendJsonAsync<ConnectFolder>(
-                    HttpMethod.Post,
-                    "folders",
-                    new
-                    {
-                        name = segment,
-                        parentId = currentId,
-                        parentType = "FOLDER",
-                        projectId
-                    },
-                    cancellationToken,
-                    ApiVersion.V21)
-                .ConfigureAwait(false);
-
+            var created = await CreateFolderAsync(projectId, currentId, segment, cancellationToken).ConfigureAwait(false);
             currentId = created.Id;
             _logger.LogInformation("Created remote folder {Folder} in project {ProjectId}.", segment, projectId);
         }
 
         return currentId;
+    }
+
+    public async Task<ConnectFolder> CreateFolderAsync(
+        string projectId,
+        string parentFolderId,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            throw new ArgumentException("projectId is required.", nameof(projectId));
+        }
+
+        if (string.IsNullOrWhiteSpace(parentFolderId)
+            || string.Equals(parentFolderId, projectId, StringComparison.OrdinalIgnoreCase))
+        {
+            parentFolderId = await ResolveRootFolderIdAsync(projectId, startFolderId: null, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var body = new FolderCreateRequest
+        {
+            Name = name,
+            ParentId = parentFolderId,
+            ParentType = "FOLDER"
+        };
+        var url = $"folders?projectId={Uri.EscapeDataString(projectId)}";
+        var created = await SendJsonAsync<ConnectFolder>(
+                HttpMethod.Post,
+                url,
+                body,
+                cancellationToken,
+                ApiVersion.V20)
+            .ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(created.Id))
+        {
+            throw new InvalidOperationException($"Trimble Connect created folder '{name}' without an id.");
+        }
+
+        created.Name ??= name;
+        created.ParentId ??= parentFolderId;
+        return created;
+    }
+
+    private async Task<string> ResolveRootFolderIdAsync(
+        string projectId,
+        string? startFolderId,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(startFolderId)
+            && !string.Equals(startFolderId, projectId, StringComparison.OrdinalIgnoreCase))
+        {
+            return startFolderId;
+        }
+
+        var project = await ResolveProjectAsync(projectId, null, cancellationToken).ConfigureAwait(false);
+        var rootId = project.EffectiveRootId;
+        if (!string.IsNullOrWhiteSpace(rootId)
+            && !string.Equals(rootId, project.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            return rootId;
+        }
+
+        throw new InvalidOperationException(
+            $"Project {projectId} did not return a root folder id. Cannot create folders without the Trimble Connect root mapping.");
     }
 
     public async Task<string?> TryResolveFolderAsync(
@@ -703,8 +750,8 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         while (true)
         {
             var url = string.IsNullOrWhiteSpace(skip)
-                ? "projects?fullyLoaded=false"
-                : $"projects?fullyLoaded=false&skipToken={Uri.EscapeDataString(skip)}";
+                ? "projects?fullyLoaded=true"
+                : $"projects?fullyLoaded=true&skipToken={Uri.EscapeDataString(skip)}";
 
             var payload = await SendRawJsonAsync(HttpMethod.Get, url, cancellationToken, ApiVersion.V21).ConfigureAwait(false);
             if (payload.ValueKind == JsonValueKind.Array)

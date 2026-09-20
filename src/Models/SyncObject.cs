@@ -34,6 +34,7 @@ public sealed class SyncObject
     public string? Type { get; set; }
 
     [JsonPropertyName("path")]
+    [JsonConverter(typeof(FlexiblePathConverter))]
     public string? Path { get; set; }
 
     [JsonPropertyName("parentId")]

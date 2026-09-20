@@ -72,6 +72,111 @@ public sealed class SyncInventoryService
         };
     }
 
+    public BrowseResponse Browse(string? path)
+    {
+        var roots = DiscoverRoots();
+        var current = string.IsNullOrWhiteSpace(path)
+            ? DefaultStartPath()
+            : Path.GetFullPath(path.Trim());
+
+        if (!Directory.Exists(current))
+        {
+            return new BrowseResponse
+            {
+                Path = current,
+                Error = "De map bestaat niet.",
+                Roots = roots
+            };
+        }
+
+        var parent = Directory.GetParent(current)?.FullName;
+        var folders = new List<BrowseEntryDto>();
+        try
+        {
+            foreach (var directory in Directory.EnumerateDirectories(current))
+            {
+                if (LocalFileWatcher.ShouldIgnore(directory))
+                {
+                    continue;
+                }
+
+                folders.Add(new BrowseEntryDto
+                {
+                    Name = Path.GetFileName(directory),
+                    Path = directory
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            return new BrowseResponse
+            {
+                Path = current,
+                Parent = parent,
+                Error = ex.Message,
+                Roots = roots,
+                Folders = folders
+            };
+        }
+
+        folders.Sort((left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
+        return new BrowseResponse
+        {
+            Path = current,
+            Parent = parent,
+            Roots = roots,
+            Folders = folders
+        };
+    }
+
+    private static string DefaultStartPath()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(home) && Directory.Exists(home))
+        {
+            return home;
+        }
+
+        return Directory.GetCurrentDirectory();
+    }
+
+    private static IReadOnlyList<BrowseEntryDto> DiscoverRoots()
+    {
+        var roots = new List<BrowseEntryDto>();
+        AddRoot(roots, "Home", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        AddRoot(roots, "Documenten", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (var drive in DriveInfo.GetDrives().Where(drive => drive.IsReady))
+            {
+                AddRoot(roots, drive.Name.TrimEnd('\\', '/'), drive.RootDirectory.FullName);
+            }
+        }
+        else
+        {
+            AddRoot(roots, "/", "/");
+            AddRoot(roots, "mnt", "/mnt");
+            AddRoot(roots, "media", "/media");
+        }
+
+        return roots;
+    }
+
+    private static void AddRoot(List<BrowseEntryDto> roots, string name, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            return;
+        }
+
+        if (roots.Any(item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        roots.Add(new BrowseEntryDto { Name = name, Path = path });
+    }
+
     public async Task<InventoryResponse> BuildAsync(InventoryRequest request, CancellationToken cancellationToken)
     {
         EnsureAuthenticatedPath(request);
@@ -344,9 +449,9 @@ public sealed class SyncInventoryService
             throw new ArgumentException("localFolderPath is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.ProjectId) && string.IsNullOrWhiteSpace(request.ProjectName))
+        if (string.IsNullOrWhiteSpace(request.ProjectId))
         {
-            throw new ArgumentException("projectName is required.");
+            throw new ArgumentException("projectId is required. Select a Trimble Connect project.");
         }
     }
 

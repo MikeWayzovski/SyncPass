@@ -9,6 +9,15 @@ public sealed class ConnectorSyncConfig
     public List<SharedSyncRule> SharedSyncRules { get; set; } = [];
 
     public List<SyncJobOptions> SyncJobs { get; set; } = [];
+
+    public WizardPreferences WizardPreferences { get; set; } = new();
+}
+
+public sealed class WizardPreferences
+{
+    public string DefaultSyncDirection { get; set; } = "LocalToCloud";
+
+    public string DefaultRemoteParentPath { get; set; } = "/";
 }
 
 public sealed class ProjectProvisioningOptions

@@ -382,7 +382,16 @@ public sealed class SyncJobStore
     {
         ProjectProvisioning = CloneProvisioning(config.ProjectProvisioning),
         SharedSyncRules = config.SharedSyncRules.Select(CloneRule).ToList(),
-        SyncJobs = config.SyncJobs.Select(CloneJob).ToList()
+        SyncJobs = config.SyncJobs.Select(CloneJob).ToList(),
+        WizardPreferences = ClonePreferences(config.WizardPreferences ?? new())
+    };
+
+    private static WizardPreferences ClonePreferences(WizardPreferences preferences) => new()
+    {
+        DefaultSyncDirection = string.IsNullOrWhiteSpace(preferences.DefaultSyncDirection)
+            ? "LocalToCloud"
+            : preferences.DefaultSyncDirection,
+        DefaultRemoteParentPath = RemotePath.Normalize(preferences.DefaultRemoteParentPath)
     };
 
     private static ProjectProvisioningOptions CloneProvisioning(ProjectProvisioningOptions options) => new()

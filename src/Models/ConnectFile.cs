@@ -17,13 +17,32 @@ public sealed class ConnectProject
     [JsonPropertyName("rootFolderId")]
     public string? RootFolderId { get; set; }
 
+    [JsonPropertyName("root")]
+    public ConnectFolder? Root { get; set; }
+
     [JsonPropertyName("location")]
     public string? Location { get; set; }
 
     [JsonPropertyName("region")]
     public string? Region { get; set; }
 
-    public string? EffectiveRootId => RootId ?? RootFolderId;
+    public string? EffectiveRootId
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(RootId))
+            {
+                return RootId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(RootFolderId))
+            {
+                return RootFolderId;
+            }
+
+            return string.IsNullOrWhiteSpace(Root?.Id) ? null : Root.Id;
+        }
+    }
 
     public string? EffectiveLocation => Location ?? Region;
 }
@@ -40,6 +59,7 @@ public sealed class ConnectFolder
     public string? ParentId { get; set; }
 
     [JsonPropertyName("path")]
+    [JsonConverter(typeof(FlexiblePathConverter))]
     public string? Path { get; set; }
 }
 
@@ -105,6 +125,18 @@ public sealed class UploadInitRequest
     /// </summary>
     [JsonIgnore]
     public string? ProjectId { get; set; }
+}
+
+public sealed class FolderCreateRequest
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("parentId")]
+    public string ParentId { get; set; } = string.Empty;
+
+    [JsonPropertyName("parentType")]
+    public string ParentType { get; set; } = "FOLDER";
 }
 
 public sealed class UploadInitResponse

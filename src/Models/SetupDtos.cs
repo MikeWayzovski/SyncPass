@@ -202,6 +202,37 @@ public sealed class LocalFolderDto
     public int FileCount { get; set; }
 }
 
+public sealed class BrowseResponse
+{
+    public string Path { get; set; } = string.Empty;
+
+    public string? Parent { get; set; }
+
+    public string? Error { get; set; }
+
+    public IReadOnlyList<BrowseEntryDto> Folders { get; set; } = [];
+
+    public IReadOnlyList<BrowseEntryDto> Roots { get; set; } = [];
+}
+
+public sealed class BrowseEntryDto
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string Path { get; set; } = string.Empty;
+}
+
+public sealed class CreateFolderRequest
+{
+    public string ProjectName { get; set; } = string.Empty;
+
+    public string ProjectId { get; set; } = string.Empty;
+
+    public string ParentPath { get; set; } = "/";
+
+    public string Name { get; set; } = string.Empty;
+}
+
 public sealed class InventoryRequest
 {
     public string ProjectName { get; set; } = string.Empty;

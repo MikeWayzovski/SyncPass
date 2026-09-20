@@ -18,7 +18,7 @@
         <div class="app-header-copy">
           <modus-wc-typography size="lg" hierarchy="h1">Trimble Connector</modus-wc-typography>
           <modus-wc-typography size="sm">
-            Account-dashboard voor padgebaseerde synchronisatie. <span id="app-version">v2.2.1</span>
+            Account-dashboard voor padgebaseerde synchronisatie. <span id="app-version">v2.2.5</span>
           </modus-wc-typography>
         </div>
         <div class="app-header-end">
@@ -31,7 +31,7 @@
             <modus-wc-icon name="notifications" size="sm" decorative></modus-wc-icon>
             Activiteit
           </modus-wc-button>
-          <modus-wc-button id="settings-btn" size="md" color="tertiary" variant="outlined" shape="square" aria-label="Project koppelen">
+          <modus-wc-button id="settings-btn" size="md" color="tertiary" variant="outlined" shape="square" aria-label="Instellingen">
             <modus-wc-icon name="settings" size="sm" decorative></modus-wc-icon>
           </modus-wc-button>
         </div>
@@ -120,77 +120,67 @@
 
               <div id="wizard-step-0" class="wizard-panel">
                 <modus-wc-typography size="sm">
-                  De lokale projectmap is de bron van waarheid. Kies een bestaande map op dit netwerk.
+                  Kies de lokale projectmap. Submappen worden meteen gescand; vink uit wat niet mee moet en zet twee-richtingen alleen aan bij samenwerking.
                 </modus-wc-typography>
-                <modus-wc-text-input
-                  id="local-path"
-                  size="sm"
-                  label="Lokale projectmap"
-                  placeholder="/home/jack/Tester2"
-                ></modus-wc-text-input>
-                <modus-wc-typography id="local-scan-copy" size="sm">Nog niet gescand.</modus-wc-typography>
-                <div class="table-wrap">
-                  <modus-wc-table id="local-tree-table" zebra density="compact" hover></modus-wc-table>
+                <div class="folder-toolbar">
+                  <modus-wc-typography id="local-path-label" size="sm">Nog geen map gekozen.</modus-wc-typography>
+                  <modus-wc-button id="browse-btn" size="sm" color="primary" variant="filled">
+                    <modus-wc-icon name="folder_open" size="xs" decorative></modus-wc-icon>
+                    Blader op netwerk / schijf
+                  </modus-wc-button>
                 </div>
+                <modus-wc-typography id="local-scan-copy" size="sm">Nog niet gescand.</modus-wc-typography>
+                <div id="map-list" class="map-list"></div>
               </div>
 
               <div id="wizard-step-1" class="wizard-panel hidden" hidden>
+                <modus-wc-typography size="sm">
+                  Kies het Trimble Connect-project uit je account. Zonder deze keuze gaat de wizard niet verder.
+                </modus-wc-typography>
+                <modus-wc-select id="project-select" size="sm" label="Trimble Connect-project"></modus-wc-select>
+                <modus-wc-text-input
+                  id="remote-target"
+                  size="sm"
+                  label="Doelmap in Trimble Connect (optioneel, standaard root '/')"
+                  placeholder="/"
+                ></modus-wc-text-input>
                 <fieldset class="radio-group">
                   <legend>
-                    <modus-wc-typography size="sm" weight="semibold">Projectkoppeling</modus-wc-typography>
+                    <modus-wc-typography size="sm" weight="semibold">Nieuw project (optioneel)</modus-wc-typography>
                   </legend>
-                  <modus-wc-radio
-                    id="link-existing"
-                    size="sm"
-                    name="link-mode"
-                    input-id="link-existing-input"
-                    label="Koppelen aan bestaand project"
-                  ></modus-wc-radio>
-                  <modus-wc-radio
-                    id="link-new"
-                    size="sm"
-                    name="link-mode"
-                    input-id="link-new-input"
-                    label="Nieuw project aanmaken (of uit template)"
-                  ></modus-wc-radio>
+                  <modus-wc-button id="show-new-project-btn" size="sm" color="tertiary" variant="outlined">
+                    <modus-wc-icon name="add" size="xs" decorative></modus-wc-icon>
+                    Nieuw project maken uit template
+                  </modus-wc-button>
                 </fieldset>
-                <div id="existing-project-fields" class="step-body">
-                  <modus-wc-select id="project-select" size="sm" label="Trimble Connect-project"></modus-wc-select>
-                </div>
                 <div id="new-project-fields" class="step-body hidden" hidden>
-                  <modus-wc-text-input id="wizard-clone-name" size="sm" label="Nieuwe projectnaam" placeholder="Project 2026-001"></modus-wc-text-input>
-                  <modus-wc-select id="wizard-template-select" size="sm" label="Templateproject (optioneel)"></modus-wc-select>
+                  <modus-wc-text-input id="wizard-clone-name" size="sm" label="Nieuwe projectnaam" placeholder="2026-001_Nieuwbouw_Sluis"></modus-wc-text-input>
+                  <modus-wc-select id="wizard-template-select" size="sm" label="Templateproject"></modus-wc-select>
                   <modus-wc-button id="wizard-create-btn" size="sm" color="tertiary" variant="outlined">
                     <modus-wc-icon name="add" size="xs" decorative></modus-wc-icon>
                     Project aanmaken
                   </modus-wc-button>
                 </div>
-                <modus-wc-typography size="sm">Optionele remote root als deze lokale map dieper in de cloud hoort.</modus-wc-typography>
-                <div class="folder-toolbar">
-                  <modus-wc-typography id="folder-crumb" size="sm">/</modus-wc-typography>
-                  <modus-wc-button id="folder-up-btn" size="sm" color="tertiary" variant="outlined">
-                    <modus-wc-icon name="arrow_left" size="xs" decorative></modus-wc-icon>
-                    Omhoog
-                  </modus-wc-button>
-                </div>
-                <div id="folder-list" class="folder-list"></div>
-                <modus-wc-typography id="folder-selected" size="sm">Remote root: /</modus-wc-typography>
               </div>
 
               <div id="wizard-step-2" class="wizard-panel hidden" hidden>
-                <modus-wc-typography size="sm">
-                  Alle lokale submappen starten op lokaal naar cloud. Zet twee-richtingen alleen aan voor mappen met externe samenwerking.
-                </modus-wc-typography>
-                <div class="table-wrap">
-                  <modus-wc-table id="map-table" zebra density="compact" hover></modus-wc-table>
-                </div>
-                <modus-wc-switch id="map-twoway" size="sm" label="Geselecteerde map: twee-richtingen"></modus-wc-switch>
+                <modus-wc-card id="summary-card" bordered="false" padding="compact">
+                  <modus-wc-typography slot="title" hierarchy="h3" size="sm" weight="semibold">Eindplaatje</modus-wc-typography>
+                  <div class="step-body">
+                    <modus-wc-typography id="summary-local" size="sm">Lokale bron: –</modus-wc-typography>
+                    <modus-wc-typography id="summary-project" size="sm">Doel Trimble Project: –</modus-wc-typography>
+                    <modus-wc-typography id="summary-folder" size="sm">Doelmap: –</modus-wc-typography>
+                    <ul id="summary-folders" class="summary-list"></ul>
+                  </div>
+                </modus-wc-card>
               </div>
 
               <div id="wizard-step-3" class="wizard-panel hidden" hidden>
-                <modus-wc-typography size="sm">
-                  Sla de koppeling op en vergelijk schijf met Trimble Connect voordat de achtergrondsync start.
-                </modus-wc-typography>
+                <modus-wc-progress id="exec-progress" label="Synchronisatie starten" indeterminate></modus-wc-progress>
+                <div class="status-row">
+                  <modus-wc-loader id="inv-loader" size="sm" variant="spinner" aria-label="Inventarisatie" hidden></modus-wc-loader>
+                  <modus-wc-typography id="inv-copy" size="sm">Wachten op bevestiging.</modus-wc-typography>
+                </div>
                 <div class="kpi-grid">
                   <modus-wc-card id="inv-upload" bordered="false" padding="compact">
                     <modus-wc-typography slot="title" hierarchy="h3" size="sm" weight="semibold">Uploaden</modus-wc-typography>
@@ -214,11 +204,7 @@
                     </div>
                   </modus-wc-card>
                 </div>
-                <modus-wc-loader id="inv-loader" size="sm" variant="spinner" aria-label="Inventarisatie" hidden></modus-wc-loader>
-                <modus-wc-typography id="inv-copy" size="sm">Nog geen inventarisatie.</modus-wc-typography>
-                <div class="table-wrap inventory-table">
-                  <modus-wc-table id="inv-table" zebra density="compact" hover></modus-wc-table>
-                </div>
+                <ul id="exec-feed" class="exec-feed" aria-live="polite"></ul>
               </div>
 
               <div class="action-row">
@@ -229,13 +215,9 @@
                   <modus-wc-icon name="arrow_right" size="xs" decorative></modus-wc-icon>
                   Volgende
                 </modus-wc-button>
-                <modus-wc-button id="save-btn" size="sm" color="primary" variant="filled" hidden>
-                  <modus-wc-icon name="search" size="xs" decorative></modus-wc-icon>
-                  Opslaan en inventariseren
-                </modus-wc-button>
-                <modus-wc-button id="activate-btn" size="sm" color="primary" variant="filled" hidden>
-                  <modus-wc-icon name="play_circle" size="xs" decorative></modus-wc-icon>
-                  Start synchronisatie
+                <modus-wc-button id="confirm-btn" size="sm" color="primary" variant="filled" hidden>
+                  <modus-wc-icon name="sync" size="xs" decorative></modus-wc-icon>
+                  Bevestigen en start synchronisatie
                 </modus-wc-button>
               </div>
             </div>
@@ -296,6 +278,30 @@
             </div>
           </modus-wc-card>
         </div>
+
+        <div slot="tab-4" class="wizard-stack" role="tabpanel" aria-label="Instellingen">
+          <modus-wc-card id="settings-card" bordered padding="compact">
+            <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Instellingen</modus-wc-typography>
+            <div class="step-body">
+              <modus-wc-typography size="sm">
+                Standaardgedrag voor nieuwe koppelingen. Deze keuzes vullen de wizard in, je kunt ze per project nog aanpassen.
+              </modus-wc-typography>
+              <modus-wc-select id="pref-direction" size="sm" label="Standaard sync-richting voor nieuwe submappen"></modus-wc-select>
+              <modus-wc-text-input
+                id="pref-remote-parent"
+                size="sm"
+                label="Standaard bovenliggende map in Trimble Connect"
+                placeholder="/01_Projecten"
+              ></modus-wc-text-input>
+              <div class="action-row">
+                <modus-wc-button id="pref-save-btn" size="sm" color="primary" variant="filled">
+                  <modus-wc-icon name="check" size="xs" decorative></modus-wc-icon>
+                  Voorkeuren opslaan
+                </modus-wc-button>
+              </div>
+            </div>
+          </modus-wc-card>
+        </div>
       </modus-wc-tabs>
 
       <modus-wc-card id="log-card" class="log-card" bordered padding="compact">
@@ -311,6 +317,29 @@
         </div>
       </modus-wc-card>
     </main>
+
+    <modus-wc-modal id="folder-browser-modal" modal-id="folder-browser-dialog" backdrop="default" position="center" show-close aria-label="Lokale map kiezen">
+      <span slot="header">Blader op netwerk / schijf</span>
+      <div slot="content" class="step-body">
+        <div class="folder-toolbar">
+          <modus-wc-typography id="browse-path" size="sm">–</modus-wc-typography>
+          <modus-wc-button id="browse-up-btn" size="sm" color="tertiary" variant="outlined">
+            <modus-wc-icon name="arrow_left" size="xs" decorative></modus-wc-icon>
+            Omhoog
+          </modus-wc-button>
+        </div>
+        <div id="browse-roots" class="folder-toolbar"></div>
+        <div id="browse-list" class="folder-list browse-list"></div>
+      </div>
+      <div slot="footer" class="action-row">
+        <modus-wc-button id="browse-cancel-btn" size="sm" color="tertiary" variant="outlined">Annuleren</modus-wc-button>
+        <modus-wc-button id="browse-select-btn" size="sm" color="primary" variant="filled">
+          <modus-wc-icon name="folder_open" size="xs" decorative></modus-wc-icon>
+          Deze map kiezen
+        </modus-wc-button>
+      </div>
+    </modus-wc-modal>
+
     <script type="module" src="/app.js"></script>
   </body>
 </html>

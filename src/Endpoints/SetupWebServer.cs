@@ -102,7 +102,7 @@ public sealed class SetupWebServer : BackgroundService
                 return;
             }
 
-            if (request.HttpMethod == "GET" && path == "/api/setup/projects")
+            if (request.HttpMethod == "GET" && (path == "/api/setup/projects" || path == "/api/projects"))
             {
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, await _api.GetProjectsAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
                 return;
@@ -139,6 +139,30 @@ public sealed class SetupWebServer : BackgroundService
                     context.Response,
                     HttpStatusCode.OK,
                     _api.ScanLocalTree(request.QueryString["path"]),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "GET" && path == "/api/setup/browse")
+            {
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    _api.BrowseLocal(request.QueryString["path"]),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "POST" && path == "/api/setup/folders")
+            {
+                using var folderReader = new StreamReader(request.InputStream, request.ContentEncoding);
+                var folderBody = await folderReader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                var folderRequest = JsonSerializer.Deserialize<CreateFolderRequest>(folderBody, JsonDefaults.Serializer)
+                    ?? throw new ArgumentException("Invalid JSON payload.");
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    await _api.CreateFolderAsync(folderRequest, cancellationToken).ConfigureAwait(false),
                     cancellationToken).ConfigureAwait(false);
                 return;
             }

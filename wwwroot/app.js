@@ -13,8 +13,13 @@ const DIRECTION_OPTIONS = [
 const WIZARD_STEPS = [
   { label: 'Lokale map' },
   { label: 'Project' },
-  { label: 'Mappen' },
-  { label: 'Inventaris' },
+  { label: 'Overzicht' },
+  { label: 'Uitvoering' },
+];
+
+const DEFAULT_DIRECTION_OPTIONS = [
+  { label: 'Lokaal naar cloud', value: 'LocalToCloud' },
+  { label: 'Twee-richtingen', value: 'TwoWay' },
 ];
 
 const state = {
@@ -27,16 +32,20 @@ const state = {
   folderId: '',
   folderPath: '/',
   crumbs: [],
-  localPath: '/home/jack/Tester2',
+  localPath: '',
   localExists: false,
   localFolders: [],
   linkMode: 'existing',
   interval: 60,
   mappings: [],
-  selectedMapping: 0,
   jobId: '',
   inventory: null,
   wizardStep: 0,
+  browsePath: '',
+  browseParent: '',
+  defaultDirection: 'LocalToCloud',
+  defaultRemoteParent: '/',
+  remoteFolderName: '',
   sharedName: '',
   sharedPath: '',
   sharedDirection: 'LocalToCloud',
@@ -64,33 +73,41 @@ const els = {
   headerUserName: document.getElementById('header-user-name'),
   loginBtn: document.getElementById('login-btn'),
   projectSelect: document.getElementById('project-select'),
-  folderList: document.getElementById('folder-list'),
-  folderCrumb: document.getElementById('folder-crumb'),
-  folderSelected: document.getElementById('folder-selected'),
-  folderUp: document.getElementById('folder-up-btn'),
-  localPath: document.getElementById('local-path'),
+  remoteTarget: document.getElementById('remote-target'),
+  showNewProjectBtn: document.getElementById('show-new-project-btn'),
+  localPathLabel: document.getElementById('local-path-label'),
+  browseBtn: document.getElementById('browse-btn'),
+  browsePath: document.getElementById('browse-path'),
+  browseUp: document.getElementById('browse-up-btn'),
+  browseRoots: document.getElementById('browse-roots'),
+  browseList: document.getElementById('browse-list'),
+  browseCancel: document.getElementById('browse-cancel-btn'),
+  browseSelect: document.getElementById('browse-select-btn'),
   localScanCopy: document.getElementById('local-scan-copy'),
-  localTreeTable: document.getElementById('local-tree-table'),
+  mapList: document.getElementById('map-list'),
   stepper: document.getElementById('link-stepper'),
   wizardHeading: document.getElementById('wizard-heading'),
   wizardBack: document.getElementById('wizard-back-btn'),
   wizardNext: document.getElementById('wizard-next-btn'),
-  saveBtn: document.getElementById('save-btn'),
-  activateBtn: document.getElementById('activate-btn'),
-  linkExisting: document.getElementById('link-existing'),
-  linkNew: document.getElementById('link-new'),
-  existingFields: document.getElementById('existing-project-fields'),
+  confirmBtn: document.getElementById('confirm-btn'),
   newFields: document.getElementById('new-project-fields'),
   wizardCloneName: document.getElementById('wizard-clone-name'),
   wizardTemplate: document.getElementById('wizard-template-select'),
   wizardCreateBtn: document.getElementById('wizard-create-btn'),
-  mapTwoWay: document.getElementById('map-twoway'),
+  summaryLocal: document.getElementById('summary-local'),
+  summaryProject: document.getElementById('summary-project'),
+  summaryFolder: document.getElementById('summary-folder'),
+  summaryFolders: document.getElementById('summary-folders'),
+  execProgress: document.getElementById('exec-progress'),
+  execFeed: document.getElementById('exec-feed'),
   invUpload: document.getElementById('inv-upload-count'),
   invDownload: document.getElementById('inv-download-count'),
   invSynced: document.getElementById('inv-synced-count'),
   invLoader: document.getElementById('inv-loader'),
   invCopy: document.getElementById('inv-copy'),
-  invTable: document.getElementById('inv-table'),
+  prefDirection: document.getElementById('pref-direction'),
+  prefRemoteParent: document.getElementById('pref-remote-parent'),
+  prefSave: document.getElementById('pref-save-btn'),
   settingsBtn: document.getElementById('settings-btn'),
   activityBtn: document.getElementById('activity-btn'),
   addProjectBtn: document.getElementById('add-project-btn'),
@@ -104,7 +121,6 @@ const els = {
   kpiSharedCopy: document.getElementById('kpi-shared-copy'),
   projectsTable: document.getElementById('projects-table'),
   sharedOverviewTable: document.getElementById('shared-overview-table'),
-  mapTable: document.getElementById('map-table'),
   sharedName: document.getElementById('shared-name'),
   sharedPath: document.getElementById('shared-path'),
   sharedProject: document.getElementById('shared-project'),
@@ -124,7 +140,7 @@ const els = {
   provisionSettingsBtn: document.getElementById('provision-settings-btn'),
 };
 
-['kpi-connection', 'kpi-projects', 'kpi-shared', 'inv-upload', 'inv-download', 'inv-synced'].forEach((id) => {
+['kpi-connection', 'kpi-projects', 'kpi-shared', 'inv-upload', 'inv-download', 'inv-synced', 'summary-card'].forEach((id) => {
   const card = document.getElementById(id);
   if (card) {
     card.bordered = false;
@@ -145,14 +161,16 @@ function bindButton(element, handler) {
   }
   let lock = false;
   const wrapped = (event) => {
-    if (lock) {
+    if (lock || element.disabled || element.hidden) {
       return;
     }
     lock = true;
-    Promise.resolve().then(() => {
-      lock = false;
-    });
-    handler(event);
+    Promise.resolve()
+      .then(() => handler(event))
+      .catch((error) => showAlert('error', error.message))
+      .finally(() => {
+        lock = false;
+      });
   };
   element.addEventListener('buttonClick', wrapped);
   element.addEventListener('click', wrapped);
@@ -178,7 +196,7 @@ function projectLabel(project) {
 
 function projectOptions() {
   return [
-    { label: 'Kies een project', value: '', hidden: true },
+    { label: 'Kies een Trimble Connect project...', value: '', disabled: true },
     ...state.projects.map((project) => ({
       label: projectLabel(project),
       value: project.id,
@@ -224,11 +242,12 @@ function renderStepper() {
     panel.toggleAttribute('hidden', inactive);
   }
   els.wizardBack.hidden = state.wizardStep === 0;
-  els.wizardNext.hidden = state.wizardStep === 3;
-  els.saveBtn.hidden = state.wizardStep !== 3;
-  els.activateBtn.hidden = state.wizardStep !== 3 || !state.inventory;
-  els.saveBtn.color = state.inventory ? 'tertiary' : 'primary';
-  els.saveBtn.variant = state.inventory ? 'outlined' : 'filled';
+  els.wizardNext.hidden = state.wizardStep >= 2;
+  els.wizardNext.disabled = state.wizardStep === 1 && !state.projectId;
+  els.confirmBtn.hidden = state.wizardStep !== 2;
+  if (state.wizardStep === 2) {
+    renderSummary();
+  }
 }
 
 function setWizardStep(index) {
@@ -236,34 +255,50 @@ function setWizardStep(index) {
   renderStepper();
 }
 
-function renderLocalTree(folders) {
-  els.localTreeTable.columns = [
-    { id: 'name', header: 'Map', accessor: 'name' },
-    { id: 'relativePath', header: 'Relatief pad', accessor: 'relativePath' },
-    { id: 'fileCount', header: 'Bestanden', accessor: 'fileCount' },
-  ];
-  els.localTreeTable.data = (folders || []).map((row, index) => ({
-    id: String(index),
-    name: row.name || '(projectroot)',
-    relativePath: row.relativePath || '(root)',
-    fileCount: String(row.fileCount ?? 0),
-  }));
+function selectedMappings() {
+  return state.mappings.filter((row) => row.included !== false);
 }
 
-function renderMappingTable() {
-  els.mapTable.columns = [
-    { id: 'localSubPath', header: 'Lokale map', accessor: 'localSubPath' },
-    { id: 'remoteFolderPath', header: 'Remote pad', accessor: 'remoteFolderPath' },
-    { id: 'direction', header: 'Richting', accessor: 'direction' },
-  ];
-  els.mapTable.data = state.mappings.map((row, index) => ({
-    id: String(index),
-    localSubPath: row.localSubPath || '(projectroot)',
-    remoteFolderPath: row.remoteFolderPath || '/',
-    direction: directionLabel(row.direction),
-  }));
-  const selected = state.mappings[state.selectedMapping];
-  els.mapTwoWay.value = selected?.direction === 'TwoWay';
+function defaultDirection() {
+  return state.defaultDirection === 'TwoWay' ? 'TwoWay' : 'LocalToCloud';
+}
+
+function renderLocalPath() {
+  els.localPathLabel.textContent = state.localPath || 'Nog geen map gekozen.';
+}
+
+function renderMappingRows() {
+  els.mapList.replaceChildren();
+  if (!state.mappings.length) {
+    const empty = document.createElement('modus-wc-typography');
+    empty.size = 'sm';
+    empty.textContent = 'Kies een lokale map om submappen te zien.';
+    els.mapList.append(empty);
+    return;
+  }
+  state.mappings.forEach((mapping) => {
+    const row = document.createElement('div');
+    row.className = 'map-row';
+    const check = document.createElement('modus-wc-checkbox');
+    check.size = 'sm';
+    check.label = `${mapping.localSubPath || '(projectroot)'} (${mapping.fileCount ?? 0} bestanden)`;
+    check.value = mapping.included !== false;
+    check.addEventListener('inputChange', (event) => {
+      mapping.included = readInputChecked(event);
+      check.value = mapping.included;
+    });
+    const toggle = document.createElement('modus-wc-switch');
+    toggle.size = 'sm';
+    toggle.label = mapping.direction === 'TwoWay' ? 'Twee-richtingen' : 'Lokaal naar cloud';
+    toggle.value = mapping.direction === 'TwoWay';
+    toggle.addEventListener('inputChange', (event) => {
+      mapping.direction = readInputChecked(event) ? 'TwoWay' : 'LocalToCloud';
+      toggle.value = mapping.direction === 'TwoWay';
+      toggle.label = mapping.direction === 'TwoWay' ? 'Twee-richtingen' : 'Lokaal naar cloud';
+    });
+    row.append(check, toggle);
+    els.mapList.append(row);
+  });
 }
 
 function mappingsFromLocalScan() {
@@ -273,27 +308,52 @@ function mappingsFromLocalScan() {
   state.mappings = folders.map((folder) => ({
     localSubPath: folder.relativePath || '',
     remoteFolderPath: joinRemote(state.folderPath, folder.relativePath || ''),
-    direction: 'LocalToCloud',
+    direction: defaultDirection(),
+    included: true,
+    fileCount: folder.fileCount ?? 0,
   }));
-  state.selectedMapping = 0;
-  renderMappingTable();
+  renderMappingRows();
 }
 
 function PathName(path) {
   return (path || '').split(/[\\/]/).filter(Boolean).at(-1) || path;
 }
 
-function inventoryActionCell(value) {
-  const label = String(value || '');
-  const wrap = document.createElement('span');
-  wrap.className = 'status-row';
+function renderSummary() {
+  const maps = selectedMappings().map((row) => ({
+    ...row,
+    remoteFolderPath: joinRemote(state.folderPath, row.localSubPath || ''),
+  }));
+  els.summaryLocal.textContent = `Lokale bron: ${state.localPath || '–'}`;
+  els.summaryProject.textContent = `Doel Trimble Project: ${state.projectName || '–'}`;
+  els.summaryFolder.textContent = `Doelmap: ${state.folderPath || '/'}`;
+  els.summaryFolders.replaceChildren();
+  if (!maps.length) {
+    const item = document.createElement('li');
+    item.textContent = 'Geen mappen geselecteerd.';
+    els.summaryFolders.append(item);
+    return;
+  }
+  maps.forEach((row) => {
+    const item = document.createElement('li');
+    item.textContent = `${row.localSubPath || '(projectroot)'} → ${row.remoteFolderPath} (${directionLabel(row.direction)})`;
+    els.summaryFolders.append(item);
+  });
+}
+
+function appendFeed(action, text) {
+  const item = document.createElement('li');
+  item.className = 'status-row';
   const icon = document.createElement('modus-wc-icon');
   icon.size = 'xs';
   icon.decorative = true;
-  const lower = label.toLowerCase();
-  icon.name = lower.includes('download') ? 'download' : lower.includes('upload') ? 'upload' : 'check_circle';
-  wrap.append(icon, document.createTextNode(label));
-  return wrap;
+  icon.name = action === 'download' ? 'download' : action === 'upload' ? 'upload' : 'check_circle';
+  const copy = document.createElement('modus-wc-typography');
+  copy.size = 'sm';
+  copy.textContent = text;
+  item.append(icon, copy);
+  els.execFeed.append(item);
+  item.scrollIntoView({ block: 'nearest' });
 }
 
 function renderInventory(result) {
@@ -302,18 +362,15 @@ function renderInventory(result) {
   els.invDownload.textContent = String(result.downloadCount ?? 0);
   els.invSynced.textContent = String(result.syncedCount ?? 0);
   els.invCopy.textContent = `${result.uploadCount} upload, ${result.downloadCount} download, ${result.syncedCount} al gelijk.`;
-  els.invTable.columns = [
-    { id: 'relativePath', header: 'Bestand', accessor: 'relativePath' },
-    { id: 'folder', header: 'Map', accessor: 'folder' },
-    { id: 'label', header: 'Actie', accessor: 'label', cellRenderer: inventoryActionCell },
-  ];
-  els.invTable.data = (result.items || []).map((row, index) => ({
-    id: String(index),
-    relativePath: row.relativePath,
-    folder: row.folder,
-    label: row.label,
-    action: row.action,
-  }));
+  els.execFeed.replaceChildren();
+  (result.items || []).forEach((row) => {
+    appendFeed(row.action, `${row.label}: ${row.relativePath}`);
+  });
+  if (els.execProgress) {
+    els.execProgress.indeterminate = false;
+    els.execProgress.value = 100;
+    els.execProgress.label = 'Koppeling actief';
+  }
   renderStepper();
 }
 
@@ -369,22 +426,14 @@ function renderDashboard() {
 
 function applyConfig(config) {
   state.config = config;
-  const jobs = config.syncJobs || [];
-  const job = currentJobFromConfig() || jobs[0] || null;
-  if (job) {
-    state.jobId = job.jobId || state.jobId;
-    state.projectId = job.projectId || state.projectId;
-    state.projectName = job.projectName || state.projectName;
-    state.mappings = (job.folderMappings || []).map((row) => ({
-      localSubPath: row.localSubPath || '',
-      remoteFolderPath: row.remoteFolderPath || '/',
-      remoteFolderId: row.remoteFolderId || '',
-      direction: row.direction || 'LocalToCloud',
-    }));
-    if (job.localProjectRoot || job.localFolderPath) {
-      state.localPath = job.localProjectRoot || job.localFolderPath;
-      els.localPath.value = state.localPath;
-    }
+  const prefs = config.wizardPreferences || {};
+  state.defaultDirection = prefs.defaultSyncDirection === 'TwoWay' ? 'TwoWay' : 'LocalToCloud';
+  state.defaultRemoteParent = prefs.defaultRemoteParentPath || '/';
+  if (els.prefDirection) {
+    els.prefDirection.value = state.defaultDirection;
+  }
+  if (els.prefRemoteParent) {
+    els.prefRemoteParent.value = state.defaultRemoteParent === '/' ? '' : state.defaultRemoteParent;
   }
   const shared = config.sharedSyncRules?.[0];
   if (shared) {
@@ -410,7 +459,7 @@ function applyConfig(config) {
   if (state.templateId) {
     els.templateSelect.value = state.templateId;
   }
-  renderMappingTable();
+  renderMappingRows();
   renderSharedTable();
   renderDashboard();
 }
@@ -532,6 +581,9 @@ function renderLogs(status) {
 }
 
 function renderFolders(folders) {
+  if (!els.folderList) {
+    return;
+  }
   els.folderList.replaceChildren();
   if (!folders.length) {
     const empty = document.createElement('modus-wc-typography');
@@ -555,8 +607,12 @@ function renderFolders(folders) {
     els.folderList.append(row);
   }
 
-  els.folderCrumb.textContent = state.folderPath || '/';
-  els.folderSelected.textContent = `Remote root: ${state.folderPath || '/'}`;
+  if (els.folderCrumb) {
+    els.folderCrumb.textContent = state.folderPath || '/';
+  }
+  if (els.folderSelected) {
+    els.folderSelected.textContent = `Doelmap: ${state.folderPath || '/'}`;
+  }
 }
 
 async function loadFolders(folderId, parentPath) {
@@ -586,71 +642,132 @@ async function openFolder(folder) {
 }
 
 async function scanLocal() {
+  if (!state.localPath) {
+    return { exists: false, error: 'Kies een lokale map.' };
+  }
   const result = await api(`/api/setup/local-tree?path=${encodeURIComponent(state.localPath)}`);
   state.localExists = Boolean(result.exists);
   state.localFolders = result.folders || [];
+  state.localPath = result.path || state.localPath;
+  renderLocalPath();
   els.localScanCopy.textContent = result.exists
     ? `${result.folders?.length || 0} mappen gevonden in ${result.path}`
     : (result.error || 'Map niet gevonden.');
-  renderLocalTree(state.localFolders);
+  if (result.exists) {
+    mappingsFromLocalScan();
+  } else {
+    state.mappings = [];
+    renderMappingRows();
+  }
   return result;
 }
 
-function preselectProjectFromFolder() {
-  const name = PathName(state.localPath);
-  const match = state.projects.find((project) => project.name === name)
-    || state.projects.find((project) => project.name?.toLowerCase().includes(name.toLowerCase()));
-  if (match) {
-    state.projectId = match.id;
-    state.projectName = match.name;
-    els.projectSelect.value = match.id;
+function folderBrowserDialog() {
+  return document.getElementById('folder-browser-dialog');
+}
+
+function renderBrowse(result) {
+  state.browsePath = result.path || state.browsePath;
+  state.browseParent = result.parent || '';
+  els.browsePath.textContent = state.browsePath || '–';
+  els.browseRoots.replaceChildren();
+  (result.roots || []).forEach((root) => {
+    const button = document.createElement('modus-wc-button');
+    button.size = 'sm';
+    button.color = 'tertiary';
+    button.variant = 'outlined';
+    button.textContent = root.name;
+    bindButton(button, () => loadBrowse(root.path));
+    els.browseRoots.append(button);
+  });
+  els.browseList.replaceChildren();
+  if (result.error) {
+    const copy = document.createElement('modus-wc-typography');
+    copy.size = 'sm';
+    copy.textContent = result.error;
+    els.browseList.append(copy);
+    return;
+  }
+  (result.folders || []).forEach((folder) => {
+    const button = document.createElement('modus-wc-button');
+    button.size = 'sm';
+    button.color = 'tertiary';
+    button.variant = 'outlined';
+    button.fullWidth = true;
+    button.innerHTML = `<modus-wc-icon name="folder_closed" size="xs" decorative></modus-wc-icon>${folder.name}`;
+    bindButton(button, () => loadBrowse(folder.path));
+    const row = document.createElement('div');
+    row.className = 'folder-row';
+    row.append(button);
+    els.browseList.append(row);
+  });
+}
+
+async function loadBrowse(path) {
+  const result = await api(`/api/setup/browse?path=${encodeURIComponent(path || '')}`);
+  renderBrowse(result);
+}
+
+async function openFolderBrowser() {
+  await loadBrowse(state.localPath || state.browsePath || '');
+  folderBrowserDialog()?.showModal();
+}
+
+function closeFolderBrowser() {
+  folderBrowserDialog()?.close();
+}
+
+async function selectBrowsedFolder() {
+  if (!state.browsePath) {
+    showAlert('error', 'Kies een map.');
+    return;
+  }
+  state.localPath = state.browsePath;
+  closeFolderBrowser();
+  renderLocalPath();
+  const result = await scanLocal();
+  if (!result.exists) {
+    showAlert('error', result.error || 'Map niet gevonden.');
+    return;
+  }
+  showAlert(null);
+}
+
+async function applyDefaultRemoteParent() {
+  const parent = state.defaultRemoteParent && state.defaultRemoteParent !== '/'
+    ? state.defaultRemoteParent
+    : '';
+  if (!parent) {
+    return;
+  }
+  state.folderPath = parent;
+  if (els.remoteTarget) {
+    els.remoteTarget.value = parent;
   }
 }
 
 function setLinkMode(mode) {
   state.linkMode = mode;
-  els.linkExisting.value = mode === 'existing';
-  els.linkNew.value = mode === 'new';
-  const hideExisting = mode !== 'existing';
   const hideNew = mode !== 'new';
-  els.existingFields.classList.toggle('hidden', hideExisting);
-  els.existingFields.toggleAttribute('hidden', hideExisting);
-  els.newFields.classList.toggle('hidden', hideNew);
-  els.newFields.toggleAttribute('hidden', hideNew);
+  els.newFields?.classList.toggle('hidden', hideNew);
+  els.newFields?.toggleAttribute('hidden', hideNew);
 }
 
 async function loadProjects() {
-  state.projects = await api('/api/setup/projects');
+  state.projects = await api('/api/projects');
   const options = projectOptions();
   els.projectSelect.options = options;
-  els.templateSelect.options = options;
-  els.wizardTemplate.options = options;
-  els.sharedProject.options = options;
-
-  const preferred = state.projectId
-    || state.projects.find((item) => item.name === state.projectName)?.id
-    || state.templateId;
-  const match = state.projects.find((project) => project.id === preferred)
-    || state.projects.find((project) => project.name === state.projectName)
-    || state.projects[0];
-  if (match) {
-    state.projectId = match.id;
-    state.projectName = match.name;
-    state.rootId = match.rootId || '';
-    if (!state.folderId) {
-      state.folderId = match.rootId || '';
-      state.folderPath = '/';
-      state.crumbs = [{ id: state.folderId, name: match.name, path: '/' }];
-    }
-    els.projectSelect.value = match.id;
-    if (!state.templateId) {
-      state.templateId = match.id;
-      state.templateName = match.name;
-    }
-    els.templateSelect.value = state.templateId;
-    els.wizardTemplate.value = state.templateId;
-    await loadFolders(state.folderId || match.rootId, state.folderPath || '/');
+  if (els.templateSelect) {
+    els.templateSelect.options = options;
   }
+  if (els.wizardTemplate) {
+    els.wizardTemplate.options = options;
+  }
+  if (els.sharedProject) {
+    els.sharedProject.options = options;
+  }
+  els.projectSelect.value = state.projectId || '';
+  renderStepper();
   renderDashboard();
 }
 
@@ -663,26 +780,23 @@ async function refreshStatus() {
 
 async function validateStep(index) {
   if (index === 0) {
-    const result = await scanLocal();
-    if (!result.exists) {
-      showAlert('error', result.error || 'Kies een bestaande lokale map.');
+    if (!state.localExists) {
+      const result = await scanLocal();
+      if (!result.exists) {
+        showAlert('error', result.error || 'Kies een bestaande lokale map.');
+        return false;
+      }
+    }
+    if (!selectedMappings().length) {
+      showAlert('error', 'Selecteer minstens één map om te synchroniseren.');
       return false;
     }
     showAlert(null);
     return true;
   }
   if (index === 1) {
-    if (!state.projectId && !state.projectName) {
-      showAlert('error', 'Kies of maak een Trimble Connect-project.');
-      return false;
-    }
-    showAlert(null);
-    mappingsFromLocalScan();
-    return true;
-  }
-  if (index === 2) {
-    if (!state.mappings.length) {
-      showAlert('error', 'Geen lokale mappen om te koppelen.');
+    if (!state.projectId) {
+      showAlert('error', 'Kies een Trimble Connect-project.');
       return false;
     }
     showAlert(null);
@@ -700,72 +814,60 @@ els.projectSelect.addEventListener('inputChange', async (event) => {
   const value = readInputString(event);
   const project = projectById(value);
   if (!project) {
+    state.projectId = '';
+    state.projectName = '';
+    els.projectSelect.value = '';
+    renderStepper();
     return;
   }
   state.projectId = project.id;
   state.projectName = project.name;
   state.rootId = project.rootId || '';
   state.folderId = project.rootId || '';
-  state.folderPath = '/';
-  state.crumbs = [{ id: state.folderId, name: project.name, path: '/' }];
   els.projectSelect.value = value;
-  await loadFolders(state.folderId, '/');
+  renderStepper();
 });
 
-bindButton(els.folderUp, async () => {
-  if (state.crumbs.length <= 1) {
-    state.folderPath = '/';
-    els.folderCrumb.textContent = '/';
-    els.folderSelected.textContent = 'Remote root: /';
-    await loadFolders(state.rootId, '/');
-    return;
-  }
-  state.crumbs.pop();
-  const parent = state.crumbs[state.crumbs.length - 1];
-  state.folderId = parent.id;
-  state.folderPath = parent.path || '/';
-  await loadFolders(parent.id, parent.path || '/');
+if (els.remoteTarget) {
+  els.remoteTarget.addEventListener('inputChange', (event) => {
+    const value = readInputString(event).trim();
+    state.folderPath = value ? (value.startsWith('/') ? value : `/${value}`) : '/';
+    els.remoteTarget.value = state.folderPath === '/' ? '' : state.folderPath;
+  });
+}
+
+bindButton(els.showNewProjectBtn, () => {
+  setLinkMode(state.linkMode === 'new' ? 'existing' : 'new');
 });
 
-els.localPath.addEventListener('inputChange', (event) => {
-  state.localPath = readInputString(event);
-  els.localPath.value = state.localPath;
-  state.localExists = false;
+bindButton(els.browseBtn, () => openFolderBrowser().catch((error) => showAlert('error', error.message)));
+bindButton(els.browseUp, () => {
+  loadBrowse(state.browseParent || '').catch((error) => showAlert('error', error.message));
 });
+bindButton(els.browseCancel, closeFolderBrowser);
+bindButton(els.browseSelect, () => selectBrowsedFolder().catch((error) => showAlert('error', error.message)));
 
 bindButton(els.wizardBack, () => setWizardStep(state.wizardStep - 1));
 bindButton(els.wizardNext, async () => {
-  try {
-    if (await validateStep(state.wizardStep)) {
-      if (state.wizardStep === 0) {
-        preselectProjectFromFolder();
-      }
-      setWizardStep(state.wizardStep + 1);
-    }
-  } catch (error) {
-    showAlert('error', error.message);
+  if (state.wizardStep >= 2) {
+    return;
   }
+  if (!(await validateStep(state.wizardStep))) {
+    return;
+  }
+  if (state.wizardStep === 0) {
+    await loadProjects();
+    if (state.defaultRemoteParent && state.defaultRemoteParent !== '/' && (!state.folderPath || state.folderPath === '/')) {
+      state.folderPath = state.defaultRemoteParent;
+    }
+    if (els.remoteTarget) {
+      els.remoteTarget.value = !state.folderPath || state.folderPath === '/' ? '' : state.folderPath;
+    }
+    els.projectSelect.value = state.projectId || '';
+  }
+  setWizardStep(state.wizardStep + 1);
 });
 
-els.linkExisting.addEventListener('inputChange', (event) => {
-  if (readInputChecked(event)) {
-    setLinkMode('existing');
-  }
-});
-els.linkNew.addEventListener('inputChange', (event) => {
-  if (readInputChecked(event)) {
-    setLinkMode('new');
-  }
-});
-els.wizardCloneName.addEventListener('inputChange', (event) => {
-  state.cloneName = readInputString(event);
-  els.wizardCloneName.value = state.cloneName;
-});
-els.wizardTemplate.addEventListener('inputChange', (event) => {
-  state.templateId = readInputString(event);
-  state.templateName = projectById(state.templateId)?.name || '';
-  els.wizardTemplate.value = state.templateId;
-});
 bindButton(els.wizardCreateBtn, async () => {
   try {
     showAlert(null);
@@ -785,34 +887,44 @@ bindButton(els.wizardCreateBtn, async () => {
     await loadProjects();
     setLinkMode('existing');
     els.projectSelect.value = state.projectId;
+    renderStepper();
   } catch (error) {
     showAlert('error', error.message);
   }
 });
-
-els.mapTable.addEventListener('rowClick', (event) => {
-  const row = event.detail?.row || {};
-  state.selectedMapping = Number(row.id ?? event.detail?.id);
-  const selected = state.mappings[state.selectedMapping];
-  els.mapTwoWay.value = selected?.direction === 'TwoWay';
+els.wizardCloneName?.addEventListener('inputChange', (event) => {
+  state.cloneName = readInputString(event);
+  els.wizardCloneName.value = state.cloneName;
 });
-els.mapTwoWay.addEventListener('inputChange', (event) => {
-  const twoWay = readInputChecked(event);
-  els.mapTwoWay.value = twoWay;
-  if (state.mappings[state.selectedMapping]) {
-    state.mappings[state.selectedMapping].direction = twoWay ? 'TwoWay' : 'LocalToCloud';
-    renderMappingTable();
-  }
+els.wizardTemplate?.addEventListener('inputChange', (event) => {
+  state.templateId = readInputString(event);
+  state.templateName = projectById(state.templateId)?.name || '';
+  els.wizardTemplate.value = state.templateId;
 });
 
-bindButton(els.saveBtn, async () => {
+function payloadMappings() {
+  const maps = selectedMappings();
+  return maps.length
+    ? maps.map((row) => ({
+        localSubPath: row.localSubPath || '',
+        remoteFolderPath: joinRemote(state.folderPath, row.localSubPath || ''),
+        direction: row.direction || defaultDirection(),
+      }))
+    : [{ localSubPath: '', remoteFolderPath: state.folderPath || '/', direction: defaultDirection() }];
+}
+
+bindButton(els.confirmBtn, async () => {
   try {
     showAlert(null);
+    setWizardStep(3);
     els.invLoader.hidden = false;
-    els.invCopy.textContent = 'Bezig met inventariseren…';
-    const mappings = state.mappings.length
-      ? state.mappings
-      : [{ localSubPath: '', remoteFolderPath: state.folderPath || '/', direction: 'LocalToCloud' }];
+    els.execProgress.indeterminate = true;
+    els.execProgress.value = 0;
+    els.execProgress.label = 'Mappen voorbereiden';
+    els.invCopy.textContent = 'Koppeling opslaan en inventariseren…';
+    els.execFeed.replaceChildren();
+    appendFeed('synced', 'Remote mappen controleren…');
+    const mappings = payloadMappings();
     const saved = await api('/api/setup/save', {
       method: 'POST',
       body: JSON.stringify({
@@ -821,12 +933,14 @@ bindButton(els.saveBtn, async () => {
         remoteFolderPath: mappings[0].remoteFolderPath || '/',
         localFolderPath: state.localPath,
         syncIntervalSeconds: state.interval,
-        direction: 'LocalToCloud',
+        direction: defaultDirection(),
         folderMappings: mappings,
-        enabled: false,
+        enabled: true,
       }),
     });
     state.jobId = saved.jobId || state.jobId;
+    els.execProgress.label = 'Inventarisatie';
+    appendFeed('synced', 'Bestanden vergelijken…');
     const inventory = await api('/api/projects/inventory', {
       method: 'POST',
       body: JSON.stringify({
@@ -838,19 +952,6 @@ bindButton(els.saveBtn, async () => {
       }),
     });
     inventory.jobId = state.jobId;
-    renderInventory(inventory);
-    await loadConfig();
-    await refreshStatus();
-    showAlert('success', 'Koppeling opgeslagen. Controleer de inventaris en start daarna de sync.');
-  } catch (error) {
-    showAlert('error', error.message);
-  } finally {
-    els.invLoader.hidden = true;
-  }
-});
-
-bindButton(els.activateBtn, async () => {
-  try {
     await api('/api/setup/activate', {
       method: 'POST',
       body: JSON.stringify({
@@ -859,20 +960,29 @@ bindButton(els.activateBtn, async () => {
         localFolderPath: state.localPath,
       }),
     });
-    showAlert('success', 'Achtergrondsynchronisatie is gestart.');
+    renderInventory(inventory);
     await loadConfig();
     await refreshStatus();
-    setTab(0);
+    showAlert('success', 'Synchronisatie is gestart.');
   } catch (error) {
     showAlert('error', error.message);
+    els.invCopy.textContent = error.message;
+    els.execProgress.indeterminate = false;
+  } finally {
+    els.invLoader.hidden = true;
   }
 });
 
 bindButton(els.settingsBtn, () => {
-  setTab(1);
-  setWizardStep(0);
+  setTab(4);
 });
 bindButton(els.addProjectBtn, () => {
+  state.projectId = '';
+  state.projectName = '';
+  state.jobId = '';
+  if (els.projectSelect) {
+    els.projectSelect.value = '';
+  }
   setTab(1);
   setWizardStep(0);
 });
@@ -882,15 +992,19 @@ bindButton(els.activityBtn, () => {
 
 els.sharedDirection.options = DIRECTION_OPTIONS;
 els.sharedDirection.value = 'LocalToCloud';
-els.localPath.value = state.localPath;
+els.prefDirection.options = DEFAULT_DIRECTION_OPTIONS;
+els.prefDirection.value = state.defaultDirection;
+renderLocalPath();
 setLinkMode('existing');
 setWizardStep(0);
+renderMappingRows();
 
 els.tabs.tabs = [
   { label: 'Overzicht', icon: 'home', iconPosition: 'left' },
   { label: 'Project koppelen', icon: 'folder_closed', iconPosition: 'left' },
-  { label: 'Centrale mappen', icon: 'link', iconPosition: 'left' },
+  { label: 'Centrale mappen', icon: 'link', iconPosition: 'left', disabled: true },
   { label: 'Nieuw project', icon: 'add', iconPosition: 'left' },
+  { label: 'Instellingen', icon: 'settings', iconPosition: 'left' },
 ];
 els.tabs.activeTabIndex = 0;
 els.tabs.addEventListener('tabChange', (event) => {
@@ -941,26 +1055,13 @@ els.projectsTable.addEventListener('rowClick', async (event) => {
     return;
   }
   state.jobId = job.jobId || '';
-  state.projectId = job.projectId || '';
-  state.projectName = job.projectName || '';
+  state.projectId = '';
+  state.projectName = '';
   state.localPath = job.localProjectRoot || job.localFolderPath || state.localPath;
-  els.localPath.value = state.localPath;
-  state.mappings = (job.folderMappings || []).map((item) => ({
-    localSubPath: item.localSubPath || '',
-    remoteFolderPath: item.remoteFolderPath || '/',
-    remoteFolderId: item.remoteFolderId || '',
-    direction: item.direction || 'LocalToCloud',
-  }));
-  renderMappingTable();
-  const project = projectById(state.projectId) || state.projects.find((item) => item.name === state.projectName);
-  if (project) {
-    state.projectId = project.id;
-    state.projectName = project.name;
-    state.rootId = project.rootId || '';
-    state.folderId = project.rootId || '';
-    state.folderPath = '/';
-    state.crumbs = [{ id: state.folderId, name: project.name, path: '/' }];
-    els.projectSelect.value = project.id;
+  renderLocalPath();
+  state.mappings = [];
+  if (els.projectSelect) {
+    els.projectSelect.value = '';
   }
   setTab(1);
   setWizardStep(0);
@@ -995,6 +1096,30 @@ bindButton(els.sharedSaveBtn, async () => {
   }
 });
 
+els.prefDirection.addEventListener('inputChange', (event) => {
+  state.defaultDirection = readInputString(event) === 'TwoWay' ? 'TwoWay' : 'LocalToCloud';
+  els.prefDirection.value = state.defaultDirection;
+});
+els.prefRemoteParent.addEventListener('inputChange', (event) => {
+  const value = readInputString(event).trim() || '/';
+  state.defaultRemoteParent = value.startsWith('/') ? value : `/${value}`;
+  els.prefRemoteParent.value = state.defaultRemoteParent === '/' ? '' : state.defaultRemoteParent;
+});
+bindButton(els.prefSave, async () => {
+  try {
+    const config = state.config || await api('/api/setup/config');
+    await saveConfig({
+      ...config,
+      wizardPreferences: {
+        defaultSyncDirection: state.defaultDirection,
+        defaultRemoteParentPath: state.defaultRemoteParent || '/',
+      },
+    });
+    showAlert('success', 'Wizardvoorkeuren zijn opgeslagen.');
+  } catch (error) {
+    showAlert('error', error.message);
+  }
+});
 els.templateSelect.addEventListener('inputChange', (event) => {
   state.templateId = readInputString(event);
   const project = projectById(state.templateId);
