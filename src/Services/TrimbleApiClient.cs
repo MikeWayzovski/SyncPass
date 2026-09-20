@@ -186,6 +186,15 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
             throw new FileNotFoundException("Local file is missing.", localFilePath);
         }
 
+        var remoteName = FileNameSanitizer.SanitizeFileName(info.Name);
+        if (!string.Equals(remoteName, info.Name, StringComparison.Ordinal))
+        {
+            _logger.LogInformation(
+                "Sanitized upload file name from {Original} to {Sanitized}.",
+                info.Name,
+                remoteName);
+        }
+
         var init = await SendJsonAsync<UploadInitResponse>(
                 HttpMethod.Post,
                 "files/fs/initiate",
@@ -194,7 +203,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
                     ProjectId = projectId,
                     ParentId = parentFolderId,
                     ParentType = "FOLDER",
-                    Name = info.Name,
+                    Name = remoteName,
                     Size = info.Length,
                     FileId = existingFileId
                 },
@@ -203,7 +212,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
             .ConfigureAwait(false);
 
         var uploadUrl = init.EffectiveUrl
-            ?? throw new InvalidOperationException($"Upload initiate for {info.Name} returned no signed URL.");
+            ?? throw new InvalidOperationException($"Upload initiate for {remoteName} returned no signed URL.");
 
         var transfer = _httpClientFactory.CreateClient("Transfer");
         await using var fileStream = new FileStream(
@@ -234,11 +243,11 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
             .ConfigureAwait(false);
 
         committed.Id = string.IsNullOrWhiteSpace(committed.Id) ? init.FileId ?? existingFileId ?? string.Empty : committed.Id;
-        committed.Name ??= info.Name;
+        committed.Name ??= remoteName;
         committed.ParentId ??= parentFolderId;
         committed.Size ??= info.Length;
 
-        _logger.LogInformation("Uploaded {File} to project {ProjectId}.", info.Name, projectId);
+        _logger.LogInformation("Uploaded {File} to project {ProjectId}.", remoteName, projectId);
         return committed;
     }
 

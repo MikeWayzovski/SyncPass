@@ -1,6 +1,6 @@
 {
   "name": "trimble-connector-setup",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "private": true,
   "description": "Pins Modus Web Components version for the localhost setup wizard.",
   "dependencies": {
