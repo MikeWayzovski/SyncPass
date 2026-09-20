@@ -205,7 +205,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
 
         var init = await SendJsonAsync<UploadInitResponse>(
                 HttpMethod.Post,
-                $"projects/{Uri.EscapeDataString(projectId)}/files/fs/initiate",
+                $"files/fs/initiate?projectId={Uri.EscapeDataString(projectId)}",
                 new UploadInitRequest
                 {
                     Name = remoteName,
@@ -238,7 +238,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
 
         var committed = await SendJsonAsync<ConnectFile>(
                 HttpMethod.Post,
-                $"projects/{Uri.EscapeDataString(projectId)}/files/fs/commit",
+                "files/fs/commit",
                 new UploadCommitRequest
                 {
                     UploadId = init.UploadId,

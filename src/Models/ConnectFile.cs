@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace TrimbleConnector.Models;
@@ -54,12 +55,14 @@ public sealed class ConnectFile
     public string? ParentId { get; set; }
 
     [JsonPropertyName("path")]
+    [JsonConverter(typeof(FlexiblePathConverter))]
     public string? Path { get; set; }
 
     [JsonPropertyName("hash")]
     public string? Hash { get; set; }
 
     [JsonPropertyName("size")]
+    [JsonConverter(typeof(FlexibleInt64Converter))]
     public long? Size { get; set; }
 
     [JsonPropertyName("versionId")]
@@ -96,6 +99,12 @@ public sealed class UploadInitRequest
 
     [JsonPropertyName("fileId")]
     public string? FileId { get; set; }
+
+    /// <summary>
+    /// Project id is not accepted in the initiate JSON body; it is not sent.
+    /// </summary>
+    [JsonIgnore]
+    public string? ProjectId { get; set; }
 }
 
 public sealed class UploadInitResponse
@@ -122,4 +131,105 @@ public sealed class UploadCommitRequest
 
     [JsonPropertyName("fileId")]
     public string? FileId { get; set; }
+}
+
+/// <summary>
+/// Trimble Connect returns <c>path</c> as a string or as an array of path segments.
+/// </summary>
+internal sealed class FlexiblePathConverter : JsonConverter<string?>
+{
+    public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            return null;
+        }
+
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            return reader.GetString();
+        }
+
+        if (reader.TokenType != JsonTokenType.StartArray)
+        {
+            reader.Skip();
+            return null;
+        }
+
+        var parts = new List<string>();
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+        {
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                var value = reader.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    parts.Add(value);
+                }
+            }
+            else if (reader.TokenType == JsonTokenType.StartObject)
+            {
+                using var item = JsonDocument.ParseValue(ref reader);
+                if (item.RootElement.TryGetProperty("name", out var name)
+                    && name.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(name.GetString()))
+                {
+                    parts.Add(name.GetString()!);
+                }
+            }
+            else
+            {
+                reader.Skip();
+            }
+        }
+
+        return parts.Count == 0 ? null : string.Join('/', parts);
+    }
+
+    public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options)
+    {
+        if (value is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStringValue(value);
+    }
+}
+
+internal sealed class FlexibleInt64Converter : JsonConverter<long?>
+{
+    public override long? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            return null;
+        }
+
+        if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt64(out var number))
+        {
+            return number;
+        }
+
+        if (reader.TokenType == JsonTokenType.String
+            && long.TryParse(reader.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+
+        reader.Skip();
+        return null;
+    }
+
+    public override void Write(Utf8JsonWriter writer, long? value, JsonSerializerOptions options)
+    {
+        if (value is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteNumberValue(value.Value);
+    }
 }
