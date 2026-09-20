@@ -14,6 +14,7 @@ public sealed class SetupApi
     private readonly SyncLogBuffer _logs;
     private readonly SyncStateRepository _states;
     private readonly ProjectProvisioningService _provisioning;
+    private readonly SyncInventoryService _inventory;
 
     public SetupApi(
         AuthSetupHelper auth,
@@ -22,7 +23,8 @@ public sealed class SetupApi
         SyncEngine engine,
         SyncLogBuffer logs,
         SyncStateRepository states,
-        ProjectProvisioningService provisioning)
+        ProjectProvisioningService provisioning,
+        SyncInventoryService inventory)
     {
         _auth = auth;
         _api = api;
@@ -31,6 +33,7 @@ public sealed class SetupApi
         _logs = logs;
         _states = states;
         _provisioning = provisioning;
+        _inventory = inventory;
     }
 
     public async Task<SetupStatusResponse> GetStatusAsync(CancellationToken cancellationToken)
@@ -48,6 +51,7 @@ public sealed class SetupApi
         }
 
         var configured = _jobs.HasConfiguredJob;
+        var config = _jobs.GetConfig();
         return new SetupStatusResponse
         {
             Authenticated = _auth.HasRefreshToken,
@@ -71,14 +75,21 @@ public sealed class SetupApi
                 : _jobs.GetJobs().Select(job => new SetupJobStatus
                 {
                     JobId = job.JobId,
+                    ProjectName = job.ProjectName,
                     ProjectId = job.ProjectId,
+                    RemoteFolderPath = RemotePath.IsRoot(job.RemoteFolderPath)
+                        ? job.RemoteFolderPath
+                        : job.EffectiveRemotePath,
                     RemoteFolderId = job.EffectiveRemoteFolderId,
                     LocalFolderPath = job.LocalFolderPath,
                     Direction = job.Direction.ToString(),
                     SyncIntervalSeconds = job.SyncIntervalSeconds,
                     State = configured ? "ready" : "idle"
                 }).ToList(),
-            Logs = _logs.Snapshot()
+            ProjectCount = config.SyncJobs.Count,
+            SharedRuleCount = config.SharedSyncRules.Count,
+            Logs = _logs.Snapshot(),
+            Version = global::TrimbleConnector.ProductInfo.DisplayVersion
         };
     }
 
@@ -103,15 +114,17 @@ public sealed class SetupApi
     }
 
     public async Task<IReadOnlyList<SetupFolderDto>> GetFoldersAsync(
-        string projectId,
+        string? projectId,
+        string? projectName,
         string? folderId,
+        string? parentPath,
         CancellationToken cancellationToken)
     {
         EnsureAuthenticated();
+        var project = await _api.ResolveProjectAsync(projectId, projectName, cancellationToken).ConfigureAwait(false);
         var resolvedFolderId = folderId;
         if (string.IsNullOrWhiteSpace(resolvedFolderId))
         {
-            var project = await _api.GetProjectAsync(projectId, cancellationToken).ConfigureAwait(false);
             resolvedFolderId = project.EffectiveRootId;
         }
 
@@ -121,10 +134,12 @@ public sealed class SetupApi
         }
 
         var folders = await _api.ListSubfoldersAsync(resolvedFolderId, cancellationToken).ConfigureAwait(false);
+        var basePath = RemotePath.Normalize(parentPath);
         return folders.Select(folder => new SetupFolderDto
         {
             Id = folder.Id,
             Name = folder.Name ?? folder.Id,
+            Path = RemotePath.Combine(basePath, folder.Name),
             ParentId = folder.ParentId ?? resolvedFolderId
         }).ToList();
     }
@@ -145,12 +160,16 @@ public sealed class SetupApi
         return project;
     }
 
-    public void Save(SaveSetupRequest request)
+    public SyncJobOptions Save(SaveSetupRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.ProjectId)
-            || string.IsNullOrWhiteSpace(request.LocalFolderPath))
+        if (string.IsNullOrWhiteSpace(request.ProjectId) && string.IsNullOrWhiteSpace(request.ProjectName))
         {
-            throw new ArgumentException("projectId and localFolderPath are required.");
+            throw new ArgumentException("projectName is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.LocalFolderPath))
+        {
+            throw new ArgumentException("localFolderPath is required.");
         }
 
         if (!Enum.TryParse<SyncDirection>(request.Direction, ignoreCase: true, out var direction))
@@ -163,32 +182,72 @@ public sealed class SetupApi
 
         var mappings = request.FolderMappings is { Count: > 0 }
             ? request.FolderMappings
-            : string.IsNullOrWhiteSpace(request.RemoteFolderId)
-                ? []
-                : [new FolderMapping
-                {
-                    LocalSubPath = string.Empty,
-                    RemoteFolderId = request.RemoteFolderId.Trim(),
-                    Direction = direction
-                }];
+            : [new FolderMapping
+            {
+                LocalSubPath = string.Empty,
+                RemoteFolderPath = RemotePath.Copy(request.RemoteFolderPath),
+                RemoteFolderId = request.RemoteFolderId?.Trim() ?? string.Empty,
+                Direction = direction
+            }];
 
-        if (mappings.Count == 0)
+        if (!mappings.Any(mapping => mapping.HasRemoteTarget))
         {
-            throw new ArgumentException("remoteFolderId or folderMappings are required.");
+            throw new ArgumentException("At least one remote folder path is required.");
         }
 
-        _jobs.UpsertProjectJob(new SyncJobOptions
+        foreach (var mapping in mappings)
         {
-            ProjectId = request.ProjectId.Trim(),
+            mapping.RemoteFolderPath = RemotePath.Copy(mapping.RemoteFolderPath);
+        }
+
+        var job = new SyncJobOptions
+        {
+            ProjectName = request.ProjectName.Trim(),
+            ProjectId = request.ProjectId?.Trim() ?? string.Empty,
+            RemoteFolderPath = mappings[0].RemoteFolderPath,
             RemoteFolderId = mappings[0].RemoteFolderId,
             LocalProjectRoot = request.LocalFolderPath.Trim(),
             LocalFolderPath = request.LocalFolderPath.Trim(),
             SyncIntervalSeconds = interval,
             Direction = direction,
-            FolderMappings = mappings
-        });
-
+            FolderMappings = mappings,
+            Enabled = request.Enabled
+        };
+        _jobs.UpsertProjectJob(job);
         _engine.ReloadJobs();
+        return _jobs.GetConfig().SyncJobs.FirstOrDefault(item =>
+                string.Equals(item.ProjectId, job.ProjectId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.EffectiveLocalRoot, job.EffectiveLocalRoot, StringComparison.OrdinalIgnoreCase))
+            ?? job;
+    }
+
+    public LocalTreeResponse ScanLocalTree(string? path) => _inventory.ScanLocal(path);
+
+    public Task<InventoryResponse> InventoryAsync(InventoryRequest request, CancellationToken cancellationToken)
+    {
+        EnsureAuthenticated();
+        return _inventory.BuildAsync(request, cancellationToken);
+    }
+
+    public SyncJobOptions Activate(ActivateJobRequest request)
+    {
+        var config = _jobs.GetConfig();
+        var job = config.SyncJobs.FirstOrDefault(item =>
+            (!string.IsNullOrWhiteSpace(request.JobId)
+                && string.Equals(item.JobId, request.JobId, StringComparison.OrdinalIgnoreCase))
+            || (!string.IsNullOrWhiteSpace(request.ProjectId)
+                && string.Equals(item.ProjectId, request.ProjectId, StringComparison.OrdinalIgnoreCase)
+                && (string.IsNullOrWhiteSpace(request.LocalFolderPath)
+                    || string.Equals(item.EffectiveLocalRoot, request.LocalFolderPath, StringComparison.OrdinalIgnoreCase))));
+        if (job is null)
+        {
+            throw new ArgumentException("Sync job was not found.");
+        }
+
+        job.Enabled = true;
+        _jobs.UpsertProjectJob(job);
+        _engine.ReloadJobs();
+        return job;
     }
 
     public async Task CompleteCallbackAsync(string code, CancellationToken cancellationToken) =>

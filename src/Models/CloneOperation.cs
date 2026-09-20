@@ -55,6 +55,8 @@ public sealed class TriggerFilePayload
 
     public string? TemplateProjectId { get; set; }
 
+    public string? TemplateProjectName { get; set; }
+
     public string? ProjectId { get; set; }
 
     public string? RootId { get; set; }

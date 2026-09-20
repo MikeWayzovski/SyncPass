@@ -7,13 +7,15 @@ public sealed class SyncJobOptions
 {
     public string JobId { get; set; } = string.Empty;
 
+    public string ProjectName { get; set; } = string.Empty;
+
     public string ProjectId { get; set; } = string.Empty;
 
     public string LocalProjectRoot { get; set; } = string.Empty;
 
     public string LocalFolderPath { get; set; } = string.Empty;
 
-    public string RemoteFolderPath { get; set; } = "/";
+    public string RemoteFolderPath { get; set; } = string.Empty;
 
     public string RemoteFolderId { get; set; } = string.Empty;
 
@@ -23,6 +25,8 @@ public sealed class SyncJobOptions
 
     public SyncDirection Direction { get; set; } = SyncDirection.TwoWay;
 
+    public bool Enabled { get; set; } = true;
+
     [JsonIgnore]
     public TimeSpan Interval => TimeSpan.FromSeconds(Math.Max(15, SyncIntervalSeconds));
 
@@ -31,7 +35,14 @@ public sealed class SyncJobOptions
         string.IsNullOrWhiteSpace(RemoteFolderId) ? null : RemoteFolderId.Trim();
 
     [JsonIgnore]
+    public string EffectiveRemotePath => RemotePath.Normalize(RemoteFolderPath);
+
+    [JsonIgnore]
     public string EffectiveLocalRoot =>
         !string.IsNullOrWhiteSpace(LocalProjectRoot) ? LocalProjectRoot.Trim()
         : LocalFolderPath?.Trim() ?? string.Empty;
+
+    [JsonIgnore]
+    public bool HasProject =>
+        !string.IsNullOrWhiteSpace(ProjectId) || !string.IsNullOrWhiteSpace(ProjectName);
 }

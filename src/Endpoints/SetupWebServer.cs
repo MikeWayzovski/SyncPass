@@ -7,7 +7,7 @@ using TrimbleConnector.Models;
 namespace TrimbleConnector.Endpoints;
 
 /// <summary>
-/// Embedded setup wizard on http://localhost:5000. Serves wwwroot and the
+/// Embedded account dashboard on http://localhost:5000. Serves wwwroot and the
 /// /api/setup Minimal-API-equivalent routes, plus the OAuth /callback.
 /// </summary>
 public sealed class SetupWebServer : BackgroundService
@@ -35,11 +35,11 @@ public sealed class SetupWebServer : BackgroundService
         }
         catch (HttpListenerException ex)
         {
-            _logger.LogError(ex, "Could not bind http://localhost:5000. The setup wizard is unavailable.");
+            _logger.LogError(ex, "Could not bind http://localhost:5000. The account dashboard is unavailable.");
             return;
         }
 
-        _logger.LogInformation("Trimble Connector setup wizard: http://localhost:5000");
+        _logger.LogInformation("Trimble Connector account dashboard: http://localhost:5000");
 
         try
         {
@@ -110,9 +110,15 @@ public sealed class SetupWebServer : BackgroundService
 
             if (request.HttpMethod == "GET" && path == "/api/setup/folders")
             {
-                var projectId = request.QueryString["projectId"] ?? string.Empty;
+                var projectId = request.QueryString["projectId"];
+                var projectName = request.QueryString["projectName"];
                 var folderId = request.QueryString["folderId"];
-                await WriteJsonAsync(context.Response, HttpStatusCode.OK, await _api.GetFoldersAsync(projectId, folderId, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+                var parentPath = request.QueryString["parentPath"];
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    await _api.GetFoldersAsync(projectId, projectName, folderId, parentPath, cancellationToken).ConfigureAwait(false),
+                    cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -122,8 +128,43 @@ public sealed class SetupWebServer : BackgroundService
                 var body = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
                 var payload = JsonSerializer.Deserialize<SaveSetupRequest>(body, JsonDefaults.Serializer)
                     ?? throw new ArgumentException("Invalid JSON payload.");
-                _api.Save(payload);
-                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { saved = true }, cancellationToken).ConfigureAwait(false);
+                var saved = _api.Save(payload);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { saved = true, jobId = saved.JobId, enabled = saved.Enabled }, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "GET" && path == "/api/setup/local-tree")
+            {
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    _api.ScanLocalTree(request.QueryString["path"]),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "POST" && (path == "/api/projects/inventory" || path == "/api/setup/inventory"))
+            {
+                using var inventoryReader = new StreamReader(request.InputStream, request.ContentEncoding);
+                var inventoryBody = await inventoryReader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                var inventory = JsonSerializer.Deserialize<InventoryRequest>(inventoryBody, JsonDefaults.Serializer)
+                    ?? throw new ArgumentException("Invalid JSON payload.");
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    await _api.InventoryAsync(inventory, cancellationToken).ConfigureAwait(false),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "POST" && path == "/api/setup/activate")
+            {
+                using var activateReader = new StreamReader(request.InputStream, request.ContentEncoding);
+                var activateBody = await activateReader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                var activate = JsonSerializer.Deserialize<ActivateJobRequest>(activateBody, JsonDefaults.Serializer)
+                    ?? throw new ArgumentException("Invalid JSON payload.");
+                var job = _api.Activate(activate);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, new { activated = true, jobId = job.JobId }, cancellationToken).ConfigureAwait(false);
                 return;
             }
 

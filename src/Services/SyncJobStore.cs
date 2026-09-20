@@ -75,7 +75,12 @@ public sealed class SyncJobStore
             NormalizeJob(job);
             var existing = _config.SyncJobs.FirstOrDefault(item =>
                 (!string.IsNullOrWhiteSpace(job.JobId) && string.Equals(item.JobId, job.JobId, StringComparison.OrdinalIgnoreCase))
-                || string.Equals(item.ProjectId, job.ProjectId, StringComparison.OrdinalIgnoreCase));
+                || (!string.IsNullOrWhiteSpace(job.ProjectId)
+                    && string.Equals(item.ProjectId, job.ProjectId, StringComparison.OrdinalIgnoreCase))
+                || (string.IsNullOrWhiteSpace(job.ProjectId)
+                    && !string.IsNullOrWhiteSpace(job.ProjectName)
+                    && string.Equals(item.ProjectName, job.ProjectName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.EffectiveLocalRoot, job.EffectiveLocalRoot, StringComparison.OrdinalIgnoreCase)));
 
             if (existing is null)
             {
@@ -224,24 +229,33 @@ public sealed class SyncJobStore
             {
                 foreach (var mapping in job.FolderMappings)
                 {
-                    if (string.IsNullOrWhiteSpace(mapping.RemoteFolderId))
+                    if (!mapping.HasRemoteTarget)
                     {
                         continue;
                     }
 
                     var local = CombineLocal(root, mapping.LocalSubPath);
+                    var rawPath = !string.IsNullOrWhiteSpace(mapping.RemoteFolderPath)
+                        ? mapping.RemoteFolderPath
+                        : job.RemoteFolderPath;
+                    var remotePath = RemotePath.Copy(rawPath);
+                    var remoteId = string.IsNullOrWhiteSpace(mapping.RemoteFolderId)
+                        ? job.RemoteFolderId
+                        : mapping.RemoteFolderId;
                     jobs.Add(new SyncJobOptions
                     {
                         JobId = string.IsNullOrWhiteSpace(job.JobId)
-                            ? MakeId("map", job.ProjectId, local, mapping.RemoteFolderId)
-                            : $"{job.JobId}:{mapping.LocalSubPath}:{mapping.RemoteFolderId}",
+                            ? MakeId("map", job.ProjectId, job.ProjectName, local, remotePath, remoteId)
+                            : $"{job.JobId}:{mapping.LocalSubPath}:{remotePath}",
+                        ProjectName = job.ProjectName,
                         ProjectId = job.ProjectId,
                         LocalProjectRoot = root,
                         LocalFolderPath = local,
-                        RemoteFolderPath = job.RemoteFolderPath,
-                        RemoteFolderId = mapping.RemoteFolderId.Trim(),
+                        RemoteFolderPath = remotePath,
+                        RemoteFolderId = remoteId?.Trim() ?? string.Empty,
                         SyncIntervalSeconds = job.SyncIntervalSeconds,
-                        Direction = mapping.Direction
+                        Direction = mapping.Direction,
+                        Enabled = job.Enabled
                     });
                 }
 
@@ -265,18 +279,25 @@ public sealed class SyncJobStore
 
             foreach (var target in rule.SyncTargets)
             {
-                if (string.IsNullOrWhiteSpace(target.ProjectId) || string.IsNullOrWhiteSpace(target.RemoteFolderId))
+                if (string.IsNullOrWhiteSpace(target.ProjectId) && string.IsNullOrWhiteSpace(target.ProjectName))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(target.RemoteFolderId) && string.IsNullOrWhiteSpace(target.RemoteFolderPath))
                 {
                     continue;
                 }
 
                 jobs.Add(new SyncJobOptions
                 {
-                    JobId = MakeId("shared", rule.Name, target.ProjectId, target.RemoteFolderId),
+                    JobId = MakeId("shared", rule.Name, target.ProjectId, target.ProjectName, target.RemoteFolderPath, target.RemoteFolderId),
+                    ProjectName = target.ProjectName,
                     ProjectId = target.ProjectId.Trim(),
                     LocalProjectRoot = rule.LocalFolderPath.Trim(),
                     LocalFolderPath = rule.LocalFolderPath.Trim(),
-                    RemoteFolderId = target.RemoteFolderId.Trim(),
+                    RemoteFolderPath = RemotePath.Copy(target.RemoteFolderPath),
+                    RemoteFolderId = target.RemoteFolderId?.Trim() ?? string.Empty,
                     SyncIntervalSeconds = rule.SyncIntervalSeconds < 15 ? 15 : rule.SyncIntervalSeconds,
                     Direction = rule.Direction
                 });
@@ -287,7 +308,7 @@ public sealed class SyncJobStore
     }
 
     internal static bool IsComplete(SyncJobOptions job) =>
-        !string.IsNullOrWhiteSpace(job.ProjectId)
+        job.HasProject
         && !string.IsNullOrWhiteSpace(job.LocalFolderPath)
         && (!string.IsNullOrWhiteSpace(job.EffectiveRemoteFolderId) || !string.IsNullOrWhiteSpace(job.RemoteFolderPath));
 
@@ -320,18 +341,20 @@ public sealed class SyncJobStore
             job.LocalProjectRoot = job.LocalFolderPath;
         }
 
-        if (string.IsNullOrWhiteSpace(job.JobId) && !string.IsNullOrWhiteSpace(job.ProjectId))
+        if (string.IsNullOrWhiteSpace(job.JobId)
+            && (job.HasProject || !string.IsNullOrWhiteSpace(job.EffectiveLocalRoot)))
         {
-            job.JobId = MakeId("job", job.ProjectId, job.EffectiveLocalRoot);
+            job.JobId = MakeId("job", job.ProjectId, job.ProjectName, job.EffectiveLocalRoot);
         }
 
         if (job.FolderMappings.Count == 0
-            && !string.IsNullOrWhiteSpace(job.EffectiveRemoteFolderId))
+            && (!string.IsNullOrWhiteSpace(job.EffectiveRemoteFolderId) || !string.IsNullOrWhiteSpace(job.RemoteFolderPath)))
         {
             job.FolderMappings.Add(new FolderMapping
             {
                 LocalSubPath = string.Empty,
-                RemoteFolderId = job.RemoteFolderId.Trim(),
+                RemoteFolderPath = RemotePath.Copy(job.RemoteFolderPath),
+                RemoteFolderId = job.RemoteFolderId?.Trim() ?? string.Empty,
                 Direction = job.Direction
             });
         }
@@ -367,6 +390,7 @@ public sealed class SyncJobStore
         AutoProvisionOnFolderTrigger = options.AutoProvisionOnFolderTrigger,
         TriggerFileName = options.TriggerFileName,
         DefaultTemplateProjectId = options.DefaultTemplateProjectId,
+        DefaultTemplateProjectName = options.DefaultTemplateProjectName,
         DefaultRegion = options.DefaultRegion,
         WatchRoot = options.WatchRoot
     };
@@ -379,7 +403,9 @@ public sealed class SyncJobStore
         SyncIntervalSeconds = rule.SyncIntervalSeconds,
         SyncTargets = rule.SyncTargets.Select(target => new SyncTarget
         {
+            ProjectName = target.ProjectName,
             ProjectId = target.ProjectId,
+            RemoteFolderPath = target.RemoteFolderPath,
             RemoteFolderId = target.RemoteFolderId
         }).ToList()
     };
@@ -387,6 +413,7 @@ public sealed class SyncJobStore
     private static SyncJobOptions CloneJob(SyncJobOptions job) => new()
     {
         JobId = job.JobId,
+        ProjectName = job.ProjectName,
         ProjectId = job.ProjectId,
         LocalProjectRoot = job.LocalProjectRoot,
         LocalFolderPath = job.LocalFolderPath,
@@ -394,9 +421,11 @@ public sealed class SyncJobStore
         RemoteFolderId = job.RemoteFolderId,
         SyncIntervalSeconds = job.SyncIntervalSeconds,
         Direction = job.Direction,
+        Enabled = job.Enabled,
         FolderMappings = job.FolderMappings.Select(mapping => new FolderMapping
         {
             LocalSubPath = mapping.LocalSubPath,
+            RemoteFolderPath = mapping.RemoteFolderPath,
             RemoteFolderId = mapping.RemoteFolderId,
             Direction = mapping.Direction
         }).ToList()

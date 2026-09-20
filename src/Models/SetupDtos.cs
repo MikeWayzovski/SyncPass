@@ -74,7 +74,13 @@ public sealed class SetupStatusResponse
 
     public IReadOnlyList<SetupJobStatus> Jobs { get; set; } = [];
 
+    public int ProjectCount { get; set; }
+
+    public int SharedRuleCount { get; set; }
+
     public IReadOnlyList<string> Logs { get; set; } = [];
+
+    public string Version { get; set; } = string.Empty;
 }
 
 public sealed class SetupUserDto
@@ -92,7 +98,11 @@ public sealed class SetupJobStatus
 {
     public string JobId { get; set; } = string.Empty;
 
+    public string ProjectName { get; set; } = string.Empty;
+
     public string ProjectId { get; set; } = string.Empty;
+
+    public string? RemoteFolderPath { get; set; }
 
     public string? RemoteFolderId { get; set; }
 
@@ -108,6 +118,8 @@ public sealed class SetupJobStatus
 public sealed class ProvisionProjectRequest
 {
     public string TemplateProjectId { get; set; } = string.Empty;
+
+    public string TemplateProjectName { get; set; } = string.Empty;
 
     public string Name { get; set; } = string.Empty;
 
@@ -144,12 +156,18 @@ public sealed class SetupFolderDto
 
     public string Name { get; set; } = string.Empty;
 
+    public string Path { get; set; } = "/";
+
     public string? ParentId { get; set; }
 }
 
 public sealed class SaveSetupRequest
 {
+    public string ProjectName { get; set; } = string.Empty;
+
     public string ProjectId { get; set; } = string.Empty;
+
+    public string RemoteFolderPath { get; set; } = "/";
 
     public string RemoteFolderId { get; set; } = string.Empty;
 
@@ -160,6 +178,76 @@ public sealed class SaveSetupRequest
     public string Direction { get; set; } = "TwoWay";
 
     public List<FolderMapping>? FolderMappings { get; set; }
+
+    public bool Enabled { get; set; }
+}
+
+public sealed class LocalTreeResponse
+{
+    public bool Exists { get; set; }
+
+    public string Path { get; set; } = string.Empty;
+
+    public string? Error { get; set; }
+
+    public IReadOnlyList<LocalFolderDto> Folders { get; set; } = [];
+}
+
+public sealed class LocalFolderDto
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string RelativePath { get; set; } = string.Empty;
+
+    public int FileCount { get; set; }
+}
+
+public sealed class InventoryRequest
+{
+    public string ProjectName { get; set; } = string.Empty;
+
+    public string ProjectId { get; set; } = string.Empty;
+
+    public string RemoteFolderPath { get; set; } = "/";
+
+    public string LocalFolderPath { get; set; } = string.Empty;
+
+    public List<FolderMapping>? FolderMappings { get; set; }
+}
+
+public sealed class InventoryResponse
+{
+    public string JobId { get; set; } = string.Empty;
+
+    public string ProjectName { get; set; } = string.Empty;
+
+    public int UploadCount { get; set; }
+
+    public int DownloadCount { get; set; }
+
+    public int SyncedCount { get; set; }
+
+    public IReadOnlyList<InventoryItemDto> Items { get; set; } = [];
+}
+
+public sealed class InventoryItemDto
+{
+    public string RelativePath { get; set; } = string.Empty;
+
+    public string Folder { get; set; } = string.Empty;
+
+    public string Action { get; set; } = string.Empty;
+
+    public string Label { get; set; } = string.Empty;
+}
+
+public sealed class ActivateJobRequest
+{
+    public string JobId { get; set; } = string.Empty;
+
+    public string ProjectId { get; set; } = string.Empty;
+
+    public string LocalFolderPath { get; set; } = string.Empty;
 }
 
 public sealed class LoginUrlResponse

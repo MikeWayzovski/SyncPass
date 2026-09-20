@@ -1,25 +1,58 @@
 # Cursor Rules for Trimble Connector (Trimble Connect Local Network Sync Daemon)
 
 ## Project Context & Architecture
-- **Project Name:** trimble Connector
-- **Purpose:** Cross-platform headless background daemon (.NET 9) that synchronizes a local network folder (SMB/NFS) with Trimble Connect Cloud using incremental REST API polling and file watching.
+- **Project Name:** Trimble Connector
+- **Purpose:** Cross-platform headless background daemon (.NET 10) that synchronizes local network folders with Trimble Connect Cloud using incremental REST API polling and file watching.
 - **Target Framework:** .NET 10 (`Microsoft.NET.Sdk.Worker`)
 - **Deployment Targets:** Windows Executable / Windows Service (`win-x64`) and Linux Daemon / Docker Container (`linux-x64`).
+- **Web UI & Management:** Embedded Kestrel web server (`http://localhost:5000`).
+
+---
+
+## 🚀 Mandatory Version Bumping & Release Lifecycle
+- **Automatic Version Increments:** Whenever code changes, new features, or refactorings are introduced, ALWAYS increment the patch or minor version (e.g., `2.2.0` -> `2.2.1` or `2.3.0`).
+- **Files to Update on Version Change:**
+  1. `TrimbleConnector.csproj` (`<Version>X.Y.Z</Version>`)
+  2. `package.json` (if present)
+  3. `src/Config/appInfo.cs` (or `src/appInfo.cs` where `vX.Y.Z` string is stored for Web UI rendering).
+- **Web UI Footer / Banner:** Always make sure the current version number is rendered dynamically or updated in the Web UI navigation header/footer.
+
+---
+
+## 🎨 UI Standards: Trimble Modus Design System
+- **Design System Mandate:** All Web UI components (`wwwroot/index.html`, modals, tables, buttons, cards) MUST adhere to **Trimble Modus Framework** (Modus CSS / Bootstrap theme).
+- **Modus UI Guidelines:**
+  - Use official Trimble Modus CDN links or local assets for CSS/JS (`@trimble-oss/modus-front-end` / `modus-layout`).
+  - Use Modus brand colors: Trimble Blue (`#0063a5`), Dark Gray (`#252a2e`), Light Gray backgrounds (`#f1f1f1`), and standard Modus status badges (`badge-success`, `badge-danger`, `badge-warning`).
+  - Use Modus form components (inputs, selects, switches) and Modus table structures for folder mapping tables and account management screens.
+  - Ensure icons utilize Trimble Modus Icons or compatible SVG icon sets.
+
+---
+
+## 🧹 Sync Data & Database Cache Reset Protocol
+- **Version Migration & Cache Invalidation:** Old local sync states or SQLite DB cached states can obscure testing during development.
+- **Auto Clean-Up on Version Bump:**
+  - On daemon startup, check the stored schema/version in the local DB or sync state against the running app version (`appInfo.cs`).
+  - If a version mismatch is detected during dev/testing, automatically purge or migrate local file hash caches (`sync-state.json`, `app.db`, `FileState` records) to prevent lingering orphaned sync states.
+  - Provide a Web UI button: `[Reset Sync Database / Cache]` on `localhost:5000` to allow the user to easily reset local sync history without deleting actual files.
+
+---
 
 ## Coding Standards & Best Practices
 
 ### 1. File I/O & Network Drives
 - Use `System.IO.FileSystemWatcher` with a Debouncer mechanism to handle CAD/BIM file saving (`Ctrl+S`).
 - Check file lock availability before attempting uploads (CAD apps hold exclusive locks during save).
-- Compare local file MD5 hashes with Trimble Connect `hash` metadata before transfer to avoid redundant network usage.
+- Compare local file MD5/SHA256 hashes with Trimble Connect `hash` metadata before transfer to avoid redundant network usage.
 
 ### 2. Trimble Connect API Integration
 - Use `HttpClient` / `IHttpClientFactory` with Bearer Token header authentication.
-- Implement incremental sync using Trimble Connect's Object Sync API:
+- Implement incremental sync using Trimble Connect's Object Sync & Core REST APIs:
   - `GET /projects/{projectId}/status` (Sync cursor)
   - `GET /projects/{projectId}/objects` (Content changes)
   - `GET /files/fs/{fileId}/downloadurl` (Pre-signed download)
   - `POST /files/fs/upload` + `/commit` (Multipart/Package upload)
+  - `POST /projects/clones` (ERP Template cloning)
 
 ### 3. Service Lifecycle
 - Implement background tasks using `BackgroundService` and `IHostedService`.

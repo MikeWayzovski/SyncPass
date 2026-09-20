@@ -109,6 +109,12 @@ public sealed class SyncEngine
                 continue;
             }
 
+            if (!job.Enabled)
+            {
+                snapshot.Add(ToStatus(job, "paused"));
+                continue;
+            }
+
             Directory.CreateDirectory(job.LocalFolderPath);
             var context = new JobContext(job, LoadState(job));
 
@@ -126,13 +132,13 @@ public sealed class SyncEngine
             contexts.Add(context);
             snapshot.Add(ToStatus(job, "ready"));
             _logger.LogInformation(
-                "Registered sync job {JobId} {ProjectId} ({Direction}) {Local} <-> folder {RemoteFolder}.",
+                "Registered sync job {JobId} {Project} ({Direction}) {Local} <-> {RemotePath}.",
                 job.JobId,
-                job.ProjectId,
+                string.IsNullOrWhiteSpace(job.ProjectName) ? job.ProjectId : job.ProjectName,
                 job.Direction,
                 job.LocalFolderPath,
-                job.EffectiveRemoteFolderId ?? job.RemoteFolderPath);
-            _logs.Add($"Sync job ready for project {job.ProjectId} ({job.LocalFolderPath}).");
+                job.EffectiveRemotePath);
+            _logs.Add($"Sync job ready for {job.ProjectName ?? job.ProjectId} ({job.EffectiveRemotePath}).");
         }
 
         var watchRoot = _jobs.GetConfig().ProjectProvisioning.WatchRoot;
@@ -199,15 +205,18 @@ public sealed class SyncEngine
     private async Task SyncJobAsync(JobContext context, CancellationToken cancellationToken)
     {
         var job = context.Job;
-        _logger.LogDebug(
-            "Starting sync cycle for {ProjectId} against EU API {Api} folder {FolderId}.",
-            job.ProjectId,
-            _connectOptions.CurrentValue.EffectiveApiBaseUrl,
-            job.EffectiveRemoteFolderId ?? job.RemoteFolderPath);
+        var project = await _api.ResolveProjectAsync(job.ProjectId, job.ProjectName, cancellationToken)
+            .ConfigureAwait(false);
+        job.ProjectId = project.Id;
+        job.ProjectName = project.Name ?? job.ProjectName;
 
-        var remoteFolderId = job.EffectiveRemoteFolderId
-            ?? await _api.ResolveOrCreateFolderAsync(job.ProjectId, job.RemoteFolderPath, cancellationToken)
-                .ConfigureAwait(false);
+        _logger.LogDebug(
+            "Starting sync cycle for {Project} against EU API {Api} folder {Folder}.",
+            string.IsNullOrWhiteSpace(job.ProjectName) ? job.ProjectId : job.ProjectName,
+            _connectOptions.CurrentValue.EffectiveApiBaseUrl,
+            job.EffectiveRemotePath);
+
+        var remoteFolderId = await ResolveRemoteFolderAsync(job, cancellationToken).ConfigureAwait(false);
 
         var changes = _watcher.Drain();
         foreach (var change in changes.Where(item => ProjectProvisioningService.IsTriggerFile(item.FullPath)))
@@ -597,6 +606,29 @@ public sealed class SyncEngine
         return files;
     }
 
+    private async Task<string> ResolveRemoteFolderAsync(SyncJobOptions job, CancellationToken cancellationToken)
+    {
+        if (!RemotePath.IsRoot(job.RemoteFolderPath))
+        {
+            var created = await _api.ResolveOrCreateFolderAsync(
+                    job.ProjectId,
+                    RemotePath.Normalize(job.RemoteFolderPath),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            job.RemoteFolderId = created;
+            return created;
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.EffectiveRemoteFolderId))
+        {
+            return job.EffectiveRemoteFolderId!;
+        }
+
+        var root = await _api.ResolveOrCreateFolderAsync(job.ProjectId, "/", cancellationToken).ConfigureAwait(false);
+        job.RemoteFolderId = root;
+        return root;
+    }
+
     private async Task<string> ResolveParentFolderAsync(
         SyncJobOptions job,
         string remoteRootId,
@@ -635,7 +667,11 @@ public sealed class SyncEngine
                     && item.RemoteFolderId == job.EffectiveRemoteFolderId));
             if (match is not null)
             {
-                match.State = state;
+                _status[_status.IndexOf(match)] = ToStatus(job, state);
+            }
+            else
+            {
+                _status.Add(ToStatus(job, state));
             }
         }
     }
@@ -643,7 +679,9 @@ public sealed class SyncEngine
     private static SetupJobStatus ToStatus(SyncJobOptions job, string state) => new()
     {
         JobId = job.JobId,
+        ProjectName = job.ProjectName,
         ProjectId = job.ProjectId,
+        RemoteFolderPath = RemotePath.IsRoot(job.RemoteFolderPath) ? job.RemoteFolderPath : job.EffectiveRemotePath,
         RemoteFolderId = job.EffectiveRemoteFolderId,
         LocalFolderPath = job.LocalFolderPath,
         Direction = job.Direction.ToString(),
@@ -653,15 +691,17 @@ public sealed class SyncEngine
 
     private bool Validate(SyncJobOptions job)
     {
-        if (string.IsNullOrWhiteSpace(job.ProjectId) || string.IsNullOrWhiteSpace(job.LocalFolderPath))
+        if (!job.HasProject || string.IsNullOrWhiteSpace(job.LocalFolderPath))
         {
-            _logger.LogWarning("Skipping incomplete SyncJob. ProjectId and LocalFolderPath are required.");
+            _logger.LogWarning("Skipping incomplete SyncJob. Project name/id and LocalFolderPath are required.");
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(job.EffectiveRemoteFolderId) && string.IsNullOrWhiteSpace(job.RemoteFolderPath))
         {
-            _logger.LogWarning("Skipping SyncJob {ProjectId}. RemoteFolderId or RemoteFolderPath is required.", job.ProjectId);
+            _logger.LogWarning(
+                "Skipping SyncJob {Project}. A remote folder path is required.",
+                job.ProjectName ?? job.ProjectId);
             return false;
         }
 

@@ -38,6 +38,8 @@ public interface ITrimbleApiClient
 
     Task<ConnectProject> GetProjectAsync(string projectId, CancellationToken cancellationToken);
 
+    Task<ConnectProject> ResolveProjectAsync(string? projectId, string? projectName, CancellationToken cancellationToken);
+
     Task<string> ResolveOrCreateFolderAsync(
         string projectId,
         string remoteFolderPath,
@@ -47,6 +49,11 @@ public interface ITrimbleApiClient
         string projectId,
         string remoteFolderPath,
         string? startFolderId,
+        CancellationToken cancellationToken);
+
+    Task<string?> TryResolveFolderAsync(
+        string projectId,
+        string remoteFolderPath,
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ConnectFile>> ListFolderFilesAsync(string folderId, CancellationToken cancellationToken);
@@ -276,6 +283,53 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
     public Task<ConnectProject> GetProjectAsync(string projectId, CancellationToken cancellationToken) =>
         SendJsonAsync<ConnectProject>(HttpMethod.Get, $"projects/{projectId}", null, cancellationToken, ApiVersion.V21);
 
+    public async Task<ConnectProject> ResolveProjectAsync(
+        string? projectId,
+        string? projectName,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(projectId) && string.IsNullOrWhiteSpace(projectName))
+        {
+            throw new InvalidOperationException("A project name or project id is required.");
+        }
+
+        var projects = await GetProjectsAsync(cancellationToken).ConfigureAwait(false);
+        ConnectProject? byId = null;
+        if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            byId = projects.FirstOrDefault(project =>
+                string.Equals(project.Id, projectId, StringComparison.OrdinalIgnoreCase));
+            if (byId is not null
+                && (string.IsNullOrWhiteSpace(projectName)
+                    || string.Equals(byId.Name, projectName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return byId;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectName))
+        {
+            var match = projects.FirstOrDefault(project =>
+                    string.Equals(project.Name, projectName, StringComparison.OrdinalIgnoreCase))
+                ?? projects.FirstOrDefault(project =>
+                    (project.Name ?? string.Empty).Contains(projectName, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        if (byId is not null)
+        {
+            return byId;
+        }
+
+        throw new InvalidOperationException(
+            string.IsNullOrWhiteSpace(projectName)
+                ? $"Trimble Connect project '{projectId}' was not found."
+                : $"No Trimble Connect project named '{projectName}' was found.");
+    }
+
     public async Task<CloneOperation> CloneProjectAsync(
         string sourceProjectId,
         string name,
@@ -330,7 +384,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
                 var projectId = last.ResolvedProjectId;
                 if (!string.IsNullOrWhiteSpace(projectId))
                 {
-                    return await GetProjectAsync(projectId, cancellationToken).ConfigureAwait(false);
+                    return await ResolveProjectAsync(projectId, null, cancellationToken).ConfigureAwait(false);
                 }
 
                 if (last.Project is not null && !string.IsNullOrWhiteSpace(last.Project.Id))
@@ -432,7 +486,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         }
         else
         {
-            var project = await GetProjectAsync(projectId, cancellationToken).ConfigureAwait(false);
+            var project = await ResolveProjectAsync(projectId, null, cancellationToken).ConfigureAwait(false);
             currentId = project.EffectiveRootId
                 ?? throw new InvalidOperationException($"Project {projectId} did not return a root folder id.");
         }
@@ -468,6 +522,36 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
 
             currentId = created.Id;
             _logger.LogInformation("Created remote folder {Folder} in project {ProjectId}.", segment, projectId);
+        }
+
+        return currentId;
+    }
+
+    public async Task<string?> TryResolveFolderAsync(
+        string projectId,
+        string remoteFolderPath,
+        CancellationToken cancellationToken)
+    {
+        var project = await ResolveProjectAsync(projectId, null, cancellationToken).ConfigureAwait(false);
+        var currentId = project.EffectiveRootId;
+        if (string.IsNullOrWhiteSpace(currentId))
+        {
+            return null;
+        }
+
+        var segments = (remoteFolderPath ?? "/")
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var segment in segments)
+        {
+            var children = await ListFolderItemsAsync(currentId, cancellationToken).ConfigureAwait(false);
+            var match = children.FirstOrDefault(item =>
+                item.IsFolder && string.Equals(item.Name, segment, StringComparison.OrdinalIgnoreCase));
+            if (match is null)
+            {
+                return null;
+            }
+
+            currentId = match.Id;
         }
 
         return currentId;

@@ -55,11 +55,12 @@ public sealed class ProjectProvisioningService
         }
 
         var config = _jobs.GetConfig();
-        var templateId = FirstNonEmpty(request.TemplateProjectId, config.ProjectProvisioning.DefaultTemplateProjectId);
-        if (string.IsNullOrWhiteSpace(templateId))
-        {
-            throw new ArgumentException("A template project id is required.");
-        }
+        var template = await ResolveTemplateAsync(
+            request.TemplateProjectId,
+            request.TemplateProjectName,
+            config.ProjectProvisioning,
+            cancellationToken).ConfigureAwait(false);
+        var templateId = template.Id;
 
         Directory.CreateDirectory(request.LocalFolderPath);
         var project = await CloneOrCreateAsync(
@@ -81,6 +82,7 @@ public sealed class ProjectProvisioningService
             Name = request.Name.Trim(),
             Description = request.Description,
             TemplateProjectId = templateId,
+            TemplateProjectName = template.Name,
             ProjectId = project.Id,
             RootId = project.EffectiveRootId,
             Status = "linked",
@@ -196,15 +198,30 @@ public sealed class ProjectProvisioningService
         }
 
         var config = _jobs.GetConfig();
-        var templateId = FirstNonEmpty(payload.TemplateProjectId, config.ProjectProvisioning.DefaultTemplateProjectId);
         var name = FirstNonEmpty(payload.Name, Path.GetFileName(folder));
-        if (string.IsNullOrWhiteSpace(templateId) || string.IsNullOrWhiteSpace(name))
+        ConnectProject template;
+        try
         {
-            _logger.LogWarning("Trigger file {Path} is missing a template project id or name.", path);
+            template = await ResolveTemplateAsync(
+                payload.TemplateProjectId,
+                payload.TemplateProjectName,
+                config.ProjectProvisioning,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Trigger file {Path} is missing a template project name.", path);
             return false;
         }
 
-        _logs.Add($"Provisioning Trimble Connect project '{name}' from template {templateId}.");
+        var templateId = template.Id;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            _logger.LogWarning("Trigger file {Path} is missing a project name.", path);
+            return false;
+        }
+
+        _logs.Add($"Provisioning Trimble Connect project '{name}' from template {template.Name ?? templateId}.");
         var project = await CloneOrCreateAsync(
             templateId,
             name,
@@ -218,6 +235,7 @@ public sealed class ProjectProvisioningService
         payload.Status = "linked";
         payload.LocalFolderPath = folder;
         payload.TemplateProjectId = templateId;
+        payload.TemplateProjectName = template.Name;
         payload.Name = name;
         WriteTriggerFile(path, payload);
         _logs.Add($"Linked local folder {folder} to project {project.Id}.");
@@ -276,6 +294,7 @@ public sealed class ProjectProvisioningService
             : [new FolderMapping
             {
                 LocalSubPath = string.Empty,
+                RemoteFolderPath = "/",
                 RemoteFolderId = rootId,
                 Direction = SyncDirection.TwoWay
             }];
@@ -283,9 +302,11 @@ public sealed class ProjectProvisioningService
         _jobs.UpsertProjectJob(new SyncJobOptions
         {
             JobId = $"job-{project.Id}",
+            ProjectName = project.Name ?? string.Empty,
             ProjectId = project.Id,
             LocalProjectRoot = localFolder,
             LocalFolderPath = localFolder,
+            RemoteFolderPath = folderMappings[0].RemoteFolderPath,
             RemoteFolderId = folderMappings[0].RemoteFolderId,
             FolderMappings = folderMappings,
             Direction = folderMappings[0].Direction,
@@ -293,6 +314,22 @@ public sealed class ProjectProvisioningService
         });
 
         _ = provisioning;
+    }
+
+    private Task<ConnectProject> ResolveTemplateAsync(
+        string? templateId,
+        string? templateName,
+        ProjectProvisioningOptions provisioning,
+        CancellationToken cancellationToken)
+    {
+        var id = FirstNonEmpty(templateId, provisioning.DefaultTemplateProjectId);
+        var name = FirstNonEmpty(templateName, provisioning.DefaultTemplateProjectName);
+        if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("A template project name is required.");
+        }
+
+        return _api.ResolveProjectAsync(id, name, cancellationToken);
     }
 
     private bool EnsureLinkedJob(

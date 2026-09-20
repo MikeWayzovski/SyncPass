@@ -19,6 +19,8 @@ public sealed class ProjectProvisioningOptions
 
     public string DefaultTemplateProjectId { get; set; } = string.Empty;
 
+    public string DefaultTemplateProjectName { get; set; } = string.Empty;
+
     public string DefaultRegion { get; set; } = "europe";
 
     public string? WatchRoot { get; set; }
@@ -39,7 +41,11 @@ public sealed class SharedSyncRule
 
 public sealed class SyncTarget
 {
+    public string ProjectName { get; set; } = string.Empty;
+
     public string ProjectId { get; set; } = string.Empty;
+
+    public string RemoteFolderPath { get; set; } = string.Empty;
 
     public string RemoteFolderId { get; set; } = string.Empty;
 }
@@ -48,7 +54,13 @@ public sealed class FolderMapping
 {
     public string LocalSubPath { get; set; } = string.Empty;
 
+    public string RemoteFolderPath { get; set; } = string.Empty;
+
     public string RemoteFolderId { get; set; } = string.Empty;
 
     public SyncDirection Direction { get; set; } = SyncDirection.TwoWay;
+
+    public bool HasRemoteTarget =>
+        !string.IsNullOrWhiteSpace(RemoteFolderPath)
+        || !string.IsNullOrWhiteSpace(RemoteFolderId);
 }
