@@ -112,12 +112,17 @@ public sealed class UploadInitRequest
     public long Size { get; set; }
 
     [JsonPropertyName("parentId")]
-    public string ParentId { get; set; } = string.Empty;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ParentId { get; set; }
 
     [JsonPropertyName("parentType")]
-    public string ParentType { get; set; } = "FOLDER";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ParentType { get; set; }
 
-    [JsonPropertyName("fileId")]
+    /// <summary>
+    /// Never send fileId on initiate. Trimble Connect rejects it with HTTP 400.
+    /// </summary>
+    [JsonIgnore]
     public string? FileId { get; set; }
 
     /// <summary>
@@ -162,6 +167,7 @@ public sealed class UploadCommitRequest
     public string? UploadId { get; set; }
 
     [JsonPropertyName("fileId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? FileId { get; set; }
 }
 

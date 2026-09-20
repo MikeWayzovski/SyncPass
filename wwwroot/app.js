@@ -31,6 +31,7 @@ const state = {
   rootId: '',
   folderId: '',
   folderPath: '/',
+  collectionProject: false,
   crumbs: [],
   localPath: '',
   localExists: false,
@@ -73,6 +74,7 @@ const els = {
   headerUserName: document.getElementById('header-user-name'),
   loginBtn: document.getElementById('login-btn'),
   projectSelect: document.getElementById('project-select'),
+  collectionProject: document.getElementById('collection-project'),
   remoteTarget: document.getElementById('remote-target'),
   showNewProjectBtn: document.getElementById('show-new-project-btn'),
   localPathLabel: document.getElementById('local-path-label'),
@@ -317,6 +319,25 @@ function mappingsFromLocalScan() {
 
 function PathName(path) {
   return (path || '').split(/[\\/]/).filter(Boolean).at(-1) || path;
+}
+
+function collectionFolderPath() {
+  const name = PathName(state.localPath);
+  if (!name) {
+    return state.defaultRemoteParent && state.defaultRemoteParent !== '/' ? state.defaultRemoteParent : '/';
+  }
+  return joinRemote(state.defaultRemoteParent || '/', name);
+}
+
+function syncRemoteTargetField() {
+  if (els.remoteTarget) {
+    els.remoteTarget.value = !state.folderPath || state.folderPath === '/' ? '' : state.folderPath;
+  }
+}
+
+function applyCollectionFolder() {
+  state.folderPath = collectionFolderPath();
+  syncRemoteTargetField();
 }
 
 function renderSummary() {
@@ -825,8 +846,27 @@ els.projectSelect.addEventListener('inputChange', async (event) => {
   state.rootId = project.rootId || '';
   state.folderId = project.rootId || '';
   els.projectSelect.value = value;
+  if (state.collectionProject) {
+    applyCollectionFolder();
+  }
   renderStepper();
 });
+
+if (els.collectionProject) {
+  els.collectionProject.value = state.collectionProject;
+  els.collectionProject.addEventListener('inputChange', (event) => {
+    state.collectionProject = readInputChecked(event);
+    els.collectionProject.value = state.collectionProject;
+    if (state.collectionProject) {
+      applyCollectionFolder();
+    } else {
+      state.folderPath = state.defaultRemoteParent && state.defaultRemoteParent !== '/'
+        ? state.defaultRemoteParent
+        : '/';
+      syncRemoteTargetField();
+    }
+  });
+}
 
 if (els.remoteTarget) {
   els.remoteTarget.addEventListener('inputChange', (event) => {
@@ -857,12 +897,12 @@ bindButton(els.wizardNext, async () => {
   }
   if (state.wizardStep === 0) {
     await loadProjects();
-    if (state.defaultRemoteParent && state.defaultRemoteParent !== '/' && (!state.folderPath || state.folderPath === '/')) {
+    if (state.collectionProject) {
+      applyCollectionFolder();
+    } else if (state.defaultRemoteParent && state.defaultRemoteParent !== '/' && (!state.folderPath || state.folderPath === '/')) {
       state.folderPath = state.defaultRemoteParent;
     }
-    if (els.remoteTarget) {
-      els.remoteTarget.value = !state.folderPath || state.folderPath === '/' ? '' : state.folderPath;
-    }
+    syncRemoteTargetField();
     els.projectSelect.value = state.projectId || '';
   }
   setWizardStep(state.wizardStep + 1);

@@ -6,10 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>TrimbleConnector</RootNamespace>
     <AssemblyName>TrimbleConnector</AssemblyName>
-    <Version>2.2.5</Version>
-    <AssemblyVersion>2.2.5.0</AssemblyVersion>
-    <FileVersion>2.2.5.0</FileVersion>
-    <InformationalVersion>2.2.5</InformationalVersion>
+    <Version>2.2.7</Version>
+    <AssemblyVersion>2.2.7.0</AssemblyVersion>
+    <FileVersion>2.2.7.0</FileVersion>
+    <InformationalVersion>2.2.7</InformationalVersion>
     <Product>Trimble Connector</Product>
     <AssemblyTitle>Trimble Connector</AssemblyTitle>
     <Description>Cross-platform daemon that synchronizes a local network folder with Trimble Connect.</Description>

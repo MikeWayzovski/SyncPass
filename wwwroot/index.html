@@ -18,7 +18,7 @@
         <div class="app-header-copy">
           <modus-wc-typography size="lg" hierarchy="h1">Trimble Connector</modus-wc-typography>
           <modus-wc-typography size="sm">
-            Account-dashboard voor padgebaseerde synchronisatie. <span id="app-version">v2.2.5</span>
+            Account-dashboard voor padgebaseerde synchronisatie. <span id="app-version">v2.2.7</span>
           </modus-wc-typography>
         </div>
         <div class="app-header-end">
@@ -138,6 +138,14 @@
                   Kies het Trimble Connect-project uit je account. Zonder deze keuze gaat de wizard niet verder.
                 </modus-wc-typography>
                 <modus-wc-select id="project-select" size="sm" label="Trimble Connect-project"></modus-wc-select>
+                <modus-wc-switch
+                  id="collection-project"
+                  size="sm"
+                  label="Verzamelproject"
+                ></modus-wc-switch>
+                <modus-wc-typography size="sm">
+                  Zet dit aan om de lokale projectmap als submap in dit project aan te maken.
+                </modus-wc-typography>
                 <modus-wc-text-input
                   id="remote-target"
                   size="sm"

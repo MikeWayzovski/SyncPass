@@ -345,7 +345,7 @@ public sealed class SyncEngine
             }
 
             _logger.LogInformation("New local file {Path}; uploading to Trimble Connect.", relative);
-            await UploadLocalAsync(context, remoteFolderId, localPath, relative, remote?.Id, localHash, cancellationToken)
+            await UploadLocalAsync(context, remoteFolderId, localPath, relative, existingFileId: null, localHash, cancellationToken)
                 .ConfigureAwait(false);
             return;
         }
@@ -414,6 +414,14 @@ public sealed class SyncEngine
     {
         var parentId = await ResolveParentFolderAsync(context.Job, remoteFolderId, relative, cancellationToken)
             .ConfigureAwait(false);
+        var length = new FileInfo(localPath).Length;
+        if (length <= 0)
+        {
+            _logger.LogWarning("Skipped {Path}; Trimble Connect rejects zero-byte initiate payloads.", relative);
+            _logs.Add($"Skipped {relative}: empty file.");
+            return;
+        }
+
         var uploaded = await _api.UploadFileAsync(
                 context.Job.ProjectId,
                 parentId,

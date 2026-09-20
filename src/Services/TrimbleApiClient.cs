@@ -232,19 +232,20 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
                 remoteName);
         }
 
-        var init = await SendJsonAsync<UploadInitResponse>(
-                HttpMethod.Post,
-                $"files/fs/initiate?projectId={Uri.EscapeDataString(projectId)}",
-                new UploadInitRequest
-                {
-                    Name = remoteName,
-                    Size = info.Length,
-                    ParentId = parentFolderId,
-                    ParentType = "FOLDER",
-                    FileId = string.IsNullOrWhiteSpace(existingFileId) ? null : existingFileId
-                },
-                cancellationToken,
-                ApiVersion.V20)
+        info.Refresh();
+        if (info.Length <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Trimble Connect rejects zero-byte initiate payloads. Skipped '{remoteName}'.");
+        }
+
+        var initUrl = $"files/fs/initiate?projectId={Uri.EscapeDataString(projectId)}";
+        var init = await InitiateUploadAsync(
+                initUrl,
+                remoteName,
+                info.Length,
+                parentFolderId,
+                cancellationToken)
             .ConfigureAwait(false);
 
         var uploadUrl = init.EffectiveUrl
@@ -271,7 +272,7 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
                 new UploadCommitRequest
                 {
                     UploadId = init.UploadId,
-                    FileId = FirstNonEmpty(init.FileId, existingFileId)
+                    FileId = string.IsNullOrWhiteSpace(init.FileId) ? null : init.FileId
                 },
                 cancellationToken,
                 ApiVersion.V20)
@@ -285,6 +286,26 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         _logger.LogInformation("Uploaded {File} to project {ProjectId}.", remoteName, projectId);
         return committed;
     }
+
+    private Task<UploadInitResponse> InitiateUploadAsync(
+        string initUrl,
+        string remoteName,
+        long size,
+        string parentFolderId,
+        CancellationToken cancellationToken) =>
+        SendJsonAsync<UploadInitResponse>(
+            HttpMethod.Post,
+            initUrl,
+            new UploadInitRequest
+            {
+                Name = remoteName,
+                Size = size,
+                ParentId = parentFolderId,
+                ParentType = "FOLDER"
+                // fileId is [JsonIgnore] and must never be sent on initiate.
+            },
+            cancellationToken,
+            ApiVersion.V20);
 
     public Task<ConnectProject> GetProjectAsync(string projectId, CancellationToken cancellationToken) =>
         SendJsonAsync<ConnectProject>(HttpMethod.Get, $"projects/{projectId}", null, cancellationToken, ApiVersion.V21);
