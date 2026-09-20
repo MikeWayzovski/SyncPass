@@ -110,17 +110,22 @@ function applyAvatar(img, fallback, url, name) {
     img.hidden = true;
     fallback.hidden = false;
   };
-  if (url) {
-    img.src = url.startsWith('http') ? '/api/setup/avatar' : url;
-    img.alt = name;
-    img.hidden = false;
-    fallback.hidden = true;
-  } else {
+  const next = url ? (url.startsWith('http') ? '/api/setup/avatar' : url) : '';
+  if (!next) {
     img.removeAttribute('src');
     img.alt = '';
     img.hidden = true;
     fallback.hidden = false;
+    return;
   }
+  if (img.getAttribute('src') === next && !img.hidden) {
+    img.alt = name;
+    return;
+  }
+  img.src = next;
+  img.alt = name;
+  img.hidden = false;
+  fallback.hidden = true;
 }
 
 function renderAuth(status) {

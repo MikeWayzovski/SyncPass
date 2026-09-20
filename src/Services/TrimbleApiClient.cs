@@ -75,9 +75,16 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         V21
     }
 
+    private static readonly TimeSpan UserCacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan UserErrorBackoff = TimeSpan.FromSeconds(30);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ITrimbleAuthService _auth;
     private readonly ILogger<TrimbleApiClient> _logger;
+    private readonly SemaphoreSlim _userGate = new(1, 1);
+    private ConnectUser? _cachedUser;
+    private DateTimeOffset _userCacheUntil;
+    private (byte[] Data, string ContentType, string Url)? _cachedAvatar;
 
     public TrimbleApiClient(
         IHttpClientFactory httpClientFactory,
@@ -358,26 +365,47 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
 
     public async Task<ConnectUser?> GetLoggedInUserAsync(CancellationToken cancellationToken)
     {
+        if (DateTimeOffset.UtcNow < _userCacheUntil)
+        {
+            return _cachedUser;
+        }
+
+        await _userGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var payload = await SendRawJsonAsync(HttpMethod.Get, "users/me", cancellationToken, ApiVersion.V20)
-                .ConfigureAwait(false);
-            if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+            if (DateTimeOffset.UtcNow < _userCacheUntil)
             {
+                return _cachedUser;
+            }
+
+            try
+            {
+                var payload = await SendRawJsonAsync(HttpMethod.Get, "users/me", cancellationToken, ApiVersion.V20)
+                    .ConfigureAwait(false);
+                if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+                {
+                    CacheUser(null, UserErrorBackoff);
+                    return null;
+                }
+
+                var user = payload.Deserialize<ConnectUser>(JsonDefaults.Serializer) ?? new ConnectUser();
+                if (string.IsNullOrWhiteSpace(user.Thumbnail))
+                {
+                    user.Thumbnail = ReadThumbnail(payload);
+                }
+
+                CacheUser(user, UserCacheTtl);
+                return user;
+            }
+            catch (HttpRequestException)
+            {
+                CacheUser(null, UserErrorBackoff);
                 return null;
             }
-
-            var user = payload.Deserialize<ConnectUser>(JsonDefaults.Serializer) ?? new ConnectUser();
-            if (string.IsNullOrWhiteSpace(user.Thumbnail))
-            {
-                user.Thumbnail = ReadThumbnail(payload);
-            }
-
-            return user;
         }
-        catch (HttpRequestException)
+        finally
         {
-            return null;
+            _userGate.Release();
         }
     }
 
@@ -390,6 +418,11 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
             return null;
         }
 
+        if (_cachedAvatar is { } cached && string.Equals(cached.Url, url, StringComparison.Ordinal))
+        {
+            return (cached.Data, cached.ContentType);
+        }
+
         var token = await _auth.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
         var client = _httpClientFactory.CreateClient("Transfer");
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -397,11 +430,16 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
+            var error = await ReadResponseBodyAsync(response, cancellationToken).ConfigureAwait(false);
+            _logger.LogError(
+                "{Error}",
+                FormatApiError(HttpMethod.Get, "users/me/thumbnail", response.StatusCode, error, requestBody: null));
             return null;
         }
 
         var data = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
         var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+        _cachedAvatar = (data, contentType, url);
         return (data, contentType);
     }
 
@@ -590,7 +628,8 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            ThrowApiError(method, relativeUrl, response.StatusCode, payload);
+            var requestJson = body is null ? null : JsonSerializer.Serialize(body, JsonDefaults.Serializer);
+            ThrowApiError(method, relativeUrl, response.StatusCode, payload, requestJson);
         }
 
         if (string.IsNullOrWhiteSpace(payload))
@@ -676,9 +715,14 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
     }
 
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
-    private void ThrowApiError(HttpMethod method, string relativeUrl, HttpStatusCode statusCode, string? body)
+    private void ThrowApiError(
+        HttpMethod method,
+        string relativeUrl,
+        HttpStatusCode statusCode,
+        string? responseBody,
+        string? requestBody = null)
     {
-        var message = FormatApiError(method, relativeUrl, statusCode, body);
+        var message = FormatApiError(method, relativeUrl, statusCode, responseBody, requestBody);
         _logger.LogError("{Error}", message);
         throw new HttpRequestException(message, inner: null, statusCode);
     }
@@ -690,10 +734,26 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         return new HttpRequestException(message, ex, ex.StatusCode);
     }
 
-    private static string FormatApiError(HttpMethod method, string relativeUrl, HttpStatusCode statusCode, string? body)
+    private void CacheUser(ConnectUser? user, TimeSpan ttl)
     {
-        var payload = string.IsNullOrWhiteSpace(body) ? "(empty)" : body.Trim();
-        return $"Trimble Connect API error [{method.Method} {relativeUrl}]: HTTP {(int)statusCode} - Response Body: {payload}";
+        _cachedUser = user;
+        _userCacheUntil = DateTimeOffset.UtcNow.Add(ttl);
+        if (user is null)
+        {
+            _cachedAvatar = null;
+        }
+    }
+
+    private static string FormatApiError(
+        HttpMethod method,
+        string relativeUrl,
+        HttpStatusCode statusCode,
+        string? responseBody,
+        string? requestBody)
+    {
+        var response = string.IsNullOrWhiteSpace(responseBody) ? "(empty)" : responseBody.Trim();
+        var request = string.IsNullOrWhiteSpace(requestBody) ? "(none)" : requestBody.Trim();
+        return $"Trimble Connect API error [{method.Method} {relativeUrl}]: HTTP {(int)statusCode} - Request Body: {request} - Response Body: {response}";
     }
 
     private static async Task<string> ReadResponseBodyAsync(
