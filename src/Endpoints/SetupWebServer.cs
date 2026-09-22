@@ -220,6 +220,64 @@ public sealed class SetupWebServer : BackgroundService
                 return;
             }
 
+            if (request.HttpMethod == "GET" && path == "/api/overview/jobs")
+            {
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, _api.GetOverviewJobs(), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "GET" && path == "/api/overview/stats")
+            {
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, _api.GetOverviewStats(), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "GET" && path == "/api/overview/tags")
+            {
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    await _api.GetConnectTagsAsync(request.QueryString["projectId"], cancellationToken).ConfigureAwait(false),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "POST" && path.StartsWith("/api/overview/jobs", StringComparison.OrdinalIgnoreCase)
+                && (path == "/api/overview/jobs/toggle" || path.EndsWith("/toggle", StringComparison.OrdinalIgnoreCase)))
+            {
+                var toggleId = request.QueryString["jobId"] ?? await ReadJobIdAsync(request, cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(toggleId) && path.StartsWith("/api/overview/jobs/", StringComparison.OrdinalIgnoreCase))
+                {
+                    toggleId = Uri.UnescapeDataString(path["/api/overview/jobs/".Length..^"/toggle".Length]);
+                }
+
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, _api.ToggleOverviewJob(toggleId ?? string.Empty), cancellationToken)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "POST" && (path == "/api/overview/jobs/sync" || path.EndsWith("/sync", StringComparison.OrdinalIgnoreCase)))
+            {
+                var syncId = request.QueryString["jobId"] ?? await ReadJobIdAsync(request, cancellationToken).ConfigureAwait(false);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, _api.RequestOverviewSync(syncId ?? string.Empty), cancellationToken)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "PUT" && path == "/api/overview/jobs/metadata")
+            {
+                using var metadataReader = new StreamReader(request.InputStream, request.ContentEncoding);
+                var metadataBody = await metadataReader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                var metadata = JsonSerializer.Deserialize<OverviewMetadataUpdateRequest>(metadataBody, JsonDefaults.Serializer)
+                    ?? throw new ArgumentException("Invalid JSON payload.");
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    await _api.UpdateOverviewMetadataAsync(metadata, cancellationToken).ConfigureAwait(false),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             if (request.HttpMethod == "GET" && path == "/api/activity")
             {
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, _api.GetRecentActivities(), cancellationToken).ConfigureAwait(false);
@@ -253,6 +311,24 @@ public sealed class SetupWebServer : BackgroundService
             _logger.LogError(ex, "Setup wizard request failed.");
             await WriteJsonAsync(context.Response, HttpStatusCode.InternalServerError, new { error = ex.Message }, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private static async Task<string?> ReadJobIdAsync(HttpListenerRequest request, CancellationToken cancellationToken)
+    {
+        if (!request.HasEntityBody)
+        {
+            return null;
+        }
+
+        using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
+        var body = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        var payload = JsonSerializer.Deserialize<OverviewJobActionRequest>(body, JsonDefaults.Serializer);
+        return payload?.JobId;
     }
 
     private async Task HandleCallbackAsync(HttpListenerContext context, CancellationToken cancellationToken)

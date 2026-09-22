@@ -1,0 +1,13 @@
+Welkom bij Trimble Connector
+
+Deze installatie start leeg: er gaan geen testdata, mappen of
+inlogtokens van de bouwer mee. Na installatie opent het dashboard
+op http://localhost:5000.
+
+Aan de slag in drie stappen:
+  1. Log in met je eigen Trimble ID
+  2. Koppel een lokale map aan een Trimble Connect-project
+  3. De Windows-service synchroniseert daarna automatisch
+
+Een bestaande installatie bijwerken laat je huidige mappen en
+geschiedenis staan, tenzij je hierna "Opnieuw beginnen" aanvinkt.

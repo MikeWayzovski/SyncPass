@@ -91,6 +91,16 @@ public interface ITrimbleApiClient
         string? description,
         string? location,
         CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<ConnectTag>> GetProjectTagsAsync(string projectId, CancellationToken cancellationToken);
+
+    Task<ConnectTag> CreateTagAsync(string projectId, string name, CancellationToken cancellationToken);
+
+    Task AssignTagToObjectsAsync(
+        string tagId,
+        IReadOnlyList<string> objectIds,
+        string objectType,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -832,6 +842,109 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
                 ParentId = item.ParentId ?? folderId
             })
             .ToList();
+    }
+
+    public async Task<IReadOnlyList<ConnectTag>> GetProjectTagsAsync(string projectId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            return [];
+        }
+
+        var url = $"tags?projectId={Uri.EscapeDataString(projectId)}";
+        foreach (var version in new[] { ApiVersion.V21, ApiVersion.V20 })
+        {
+            try
+            {
+                var payload = await SendRawJsonAsync(HttpMethod.Get, url, cancellationToken, version).ConfigureAwait(false);
+                return ParseTags(payload);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "GET {Url} failed on {Version}.", url, version);
+            }
+        }
+
+        return [];
+    }
+
+    public async Task<ConnectTag> CreateTagAsync(string projectId, string name, CancellationToken cancellationToken)
+    {
+        var body = new TagCreateRequest
+        {
+            Name = name.Trim(),
+            ProjectId = projectId
+        };
+
+        try
+        {
+            return await SendJsonAsync<ConnectTag>(HttpMethod.Post, "tags", body, cancellationToken, ApiVersion.V21)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "POST tags on v2.1 failed; retrying v2.0.");
+            return await SendJsonAsync<ConnectTag>(
+                    HttpMethod.Post,
+                    $"tags?projectId={Uri.EscapeDataString(projectId)}",
+                    body,
+                    cancellationToken,
+                    ApiVersion.V20)
+                .ConfigureAwait(false);
+        }
+    }
+
+    public async Task AssignTagToObjectsAsync(
+        string tagId,
+        IReadOnlyList<string> objectIds,
+        string objectType,
+        CancellationToken cancellationToken)
+    {
+        var body = new TagAssignRequest
+        {
+            ObjectIds = objectIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            ObjectType = string.IsNullOrWhiteSpace(objectType) ? "FOLDER" : objectType
+        };
+        if (body.ObjectIds.Count == 0)
+        {
+            return;
+        }
+
+        var url = $"tags/{Uri.EscapeDataString(tagId)}/objects";
+        try
+        {
+            using var response = await SendAsync(HttpMethod.Post, url, body, cancellationToken, ApiVersion.V21)
+                .ConfigureAwait(false);
+            await ThrowIfUnsuccessfulAsync(response, HttpMethod.Post, url, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "POST {Url} on v2.1 failed; retrying v2.0.", url);
+            using var retry = await SendAsync(HttpMethod.Post, url, body, cancellationToken, ApiVersion.V20)
+                .ConfigureAwait(false);
+            await ThrowIfUnsuccessfulAsync(retry, HttpMethod.Post, url, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static IReadOnlyList<ConnectTag> ParseTags(JsonElement payload)
+    {
+        if (payload.ValueKind == JsonValueKind.Array)
+        {
+            return payload.Deserialize<List<ConnectTag>>(ApiJsonOptions) ?? [];
+        }
+
+        if (payload.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "items", "tags", "data", "value" })
+            {
+                if (payload.TryGetProperty(name, out var items) && items.ValueKind == JsonValueKind.Array)
+                {
+                    return items.Deserialize<List<ConnectTag>>(ApiJsonOptions) ?? [];
+                }
+            }
+        }
+
+        return [];
     }
 
     public async Task DeleteFileAsync(string fileId, CancellationToken cancellationToken)

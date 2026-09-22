@@ -6,10 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>TrimbleConnector</RootNamespace>
     <AssemblyName>TrimbleConnector</AssemblyName>
-    <Version>2.2.7</Version>
-    <AssemblyVersion>2.2.7.0</AssemblyVersion>
-    <FileVersion>2.2.7.0</FileVersion>
-    <InformationalVersion>2.2.7</InformationalVersion>
+    <Version>2.3.2</Version>
+    <AssemblyVersion>2.3.2.0</AssemblyVersion>
+    <FileVersion>2.3.2.0</FileVersion>
+    <InformationalVersion>2.3.2</InformationalVersion>
     <Product>Trimble Connector</Product>
     <AssemblyTitle>Trimble Connector</AssemblyTitle>
     <Description>Cross-platform daemon that synchronizes a local network folder with Trimble Connect.</Description>
@@ -29,9 +29,24 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
-    <Content Update="appsettings.Development.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+    <Content Update="appsettings.Development.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
     <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Update="appsettings.example.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
   </ItemGroup>
+
+  <Target Name="SanitizePublishOutput" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <ItemGroup>
+      <_SanitizeFiles Include="$(PublishDir)appsettings.Development.json" />
+      <_SanitizeFiles Include="$(PublishDir).application_credentials" />
+      <_SanitizeFiles Include="$(PublishDir)**\*.token" />
+      <_SanitizeFiles Include="$(PublishDir)data\**\*" />
+    </ItemGroup>
+    <Delete Files="@(_SanitizeFiles)" TreatErrorsAsWarnings="true" />
+    <RemoveDir Directories="$(PublishDir)data" />
+    <Exec
+      Command="python3 &quot;$(MSBuildProjectDirectory)/scripts/prepare-factory-appsettings.py&quot; &quot;$(MSBuildProjectDirectory)&quot; &quot;$(PublishDir)&quot;"
+      Condition="Exists('$(MSBuildProjectDirectory)/scripts/prepare-factory-appsettings.py')" />
+  </Target>
 
 </Project>

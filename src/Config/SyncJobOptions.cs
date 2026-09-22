@@ -27,6 +27,8 @@ public sealed class SyncJobOptions
 
     public bool Enabled { get; set; } = true;
 
+    public FolderMetadata Metadata { get; set; } = new();
+
     [JsonIgnore]
     public TimeSpan Interval => TimeSpan.FromSeconds(Math.Max(15, SyncIntervalSeconds));
 

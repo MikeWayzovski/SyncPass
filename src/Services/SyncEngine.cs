@@ -24,6 +24,7 @@ public sealed class SyncEngine
     private readonly object _statusLock = new();
     private List<SetupJobStatus> _status = [];
     private CancellationTokenSource? _reloadCts;
+    private CancellationTokenSource? _wakeCts;
 
     public SyncEngine(
         ITrimbleApiClient api,
@@ -62,6 +63,22 @@ public sealed class SyncEngine
     {
         _logs.Add("Configuration updated. Reloading sync jobs.");
         _reloadCts?.Cancel();
+    }
+
+    public void RequestImmediateSync(string? jobId = null)
+    {
+        if (!string.IsNullOrWhiteSpace(jobId))
+        {
+            _logs.Add($"Handmatige sync gevraagd voor {jobId}.");
+        }
+
+        try
+        {
+            _wakeCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -198,7 +215,16 @@ public sealed class SyncEngine
                 }
             }
 
-            await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
+            using var wake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _wakeCts = wake;
+            try
+            {
+                await Task.Delay(wait, wake.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logs.Add("Sync interval interrupted for an immediate cycle.");
+            }
         }
     }
 

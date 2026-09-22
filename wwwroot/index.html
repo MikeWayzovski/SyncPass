@@ -18,7 +18,7 @@
         <div class="app-header-copy">
           <modus-wc-typography size="lg" hierarchy="h1">Trimble Connector</modus-wc-typography>
           <modus-wc-typography size="sm">
-            Account-dashboard voor padgebaseerde synchronisatie. <span id="app-version">v2.2.7</span>
+            Account-dashboard voor padgebaseerde synchronisatie. <span id="app-version">v2.3.2</span>
           </modus-wc-typography>
         </div>
         <div class="app-header-end">
@@ -41,6 +41,39 @@
 
       <modus-wc-tabs id="main-tabs" size="sm" tab-style="bordered" aria-label="Connector secties">
         <div slot="tab-0" class="wizard-stack" role="tabpanel" aria-label="Overzicht">
+          <modus-wc-card id="first-run-card" bordered padding="comfortable" hidden>
+            <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Aan de slag</modus-wc-typography>
+            <div class="step-body">
+              <modus-wc-typography id="first-run-copy" size="sm">
+                Deze connector is leeg. Log in met je Trimble ID en koppel daarna je eerste map.
+              </modus-wc-typography>
+              <ol class="first-run-steps">
+                <li>
+                  <modus-wc-icon name="person" size="sm" decorative></modus-wc-icon>
+                  <modus-wc-typography size="sm">Log in met je eigen Trimble ID</modus-wc-typography>
+                </li>
+                <li>
+                  <modus-wc-icon name="folder_open" size="sm" decorative></modus-wc-icon>
+                  <modus-wc-typography size="sm">Koppel een lokale map aan een Connect-project</modus-wc-typography>
+                </li>
+                <li>
+                  <modus-wc-icon name="check" size="sm" decorative></modus-wc-icon>
+                  <modus-wc-typography size="sm">De service synchroniseert daarna automatisch</modus-wc-typography>
+                </li>
+              </ol>
+              <div class="action-row action-row-start">
+                <modus-wc-button id="first-run-login-btn" size="sm" color="tertiary" variant="outlined">
+                  <modus-wc-icon name="person" size="xs" decorative></modus-wc-icon>
+                  Inloggen
+                </modus-wc-button>
+                <modus-wc-button id="first-run-link-btn" size="sm" color="primary" variant="filled" hidden>
+                  <modus-wc-icon name="folder_open" size="xs" decorative></modus-wc-icon>
+                  Project koppelen
+                </modus-wc-button>
+              </div>
+            </div>
+          </modus-wc-card>
+
           <modus-wc-card id="auth-card" bordered padding="compact">
             <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Account</modus-wc-typography>
             <div class="step-body">
@@ -109,7 +142,60 @@
           </modus-wc-card>
         </div>
 
-        <div slot="tab-1" class="wizard-stack" role="tabpanel" aria-label="Project koppelen">
+        <div slot="tab-1" class="wizard-stack" role="tabpanel" aria-label="Mappen en projecten">
+          <modus-wc-card id="mapping-stats-card" bordered padding="compact">
+            <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Mappen &amp; projecten overzicht</modus-wc-typography>
+            <div class="kpi-grid">
+              <modus-wc-card id="kpi-mappings" bordered="false" padding="compact">
+                <modus-wc-typography slot="title" hierarchy="h3" size="sm" weight="semibold">Actieve koppelingen</modus-wc-typography>
+                <div class="step-body">
+                  <modus-wc-typography id="kpi-mappings-copy" size="md" weight="semibold">0</modus-wc-typography>
+                  <modus-wc-typography id="kpi-mappings-total" size="sm">0 mappen in totaal</modus-wc-typography>
+                </div>
+              </modus-wc-card>
+              <modus-wc-card id="kpi-files" bordered="false" padding="compact">
+                <modus-wc-typography slot="title" hierarchy="h3" size="sm" weight="semibold">Gesynchroniseerde bestanden</modus-wc-typography>
+                <div class="step-body">
+                  <modus-wc-typography id="kpi-files-copy" size="md" weight="semibold">0</modus-wc-typography>
+                  <modus-wc-typography size="sm">Uit de lokale sync-cache</modus-wc-typography>
+                </div>
+              </modus-wc-card>
+              <modus-wc-card id="kpi-disk" bordered="false" padding="compact">
+                <modus-wc-typography slot="title" hierarchy="h3" size="sm" weight="semibold">Schijfgebruik</modus-wc-typography>
+                <div class="step-body">
+                  <modus-wc-typography id="kpi-disk-copy" size="md" weight="semibold">0 MB</modus-wc-typography>
+                  <modus-wc-typography size="sm">Som van gekoppelde lokale mappen</modus-wc-typography>
+                </div>
+              </modus-wc-card>
+              <modus-wc-card id="kpi-activity" bordered="false" padding="compact">
+                <modus-wc-typography slot="title" hierarchy="h3" size="sm" weight="semibold">Laatste activiteit</modus-wc-typography>
+                <div class="step-body">
+                  <modus-wc-typography id="kpi-activity-copy" size="sm">Nog geen activiteit</modus-wc-typography>
+                </div>
+              </modus-wc-card>
+            </div>
+          </modus-wc-card>
+
+          <modus-wc-card id="mapping-grid-card" bordered padding="compact">
+            <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Folderkoppelingen</modus-wc-typography>
+            <div class="step-body">
+              <div class="filter-row">
+                <modus-wc-text-input
+                  id="overview-search"
+                  size="sm"
+                  label="Zoeken"
+                  placeholder="Projectcode, lokaal pad of remote map"
+                ></modus-wc-text-input>
+                <modus-wc-select id="overview-status-filter" size="sm" label="Status"></modus-wc-select>
+              </div>
+              <div class="table-wrap">
+                <modus-wc-table id="overview-table" zebra density="compact" hover caption="Alle gekoppelde projectmappen"></modus-wc-table>
+              </div>
+            </div>
+          </modus-wc-card>
+        </div>
+
+        <div slot="tab-2" class="wizard-stack" role="tabpanel" aria-label="Project koppelen">
           <modus-wc-card id="wizard-card" bordered padding="compact">
             <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Project koppelen</modus-wc-typography>
             <div class="step-body">
@@ -232,7 +318,7 @@
           </modus-wc-card>
         </div>
 
-        <div slot="tab-2" class="wizard-stack" role="tabpanel" aria-label="Centrale mappen">
+        <div slot="tab-3" class="wizard-stack" role="tabpanel" aria-label="Centrale mappen">
           <modus-wc-card id="shared-card" bordered padding="compact">
             <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Centrale mappen</modus-wc-typography>
             <div class="step-body">
@@ -264,7 +350,7 @@
           </modus-wc-card>
         </div>
 
-        <div slot="tab-3" class="wizard-stack" role="tabpanel" aria-label="Nieuw project">
+        <div slot="tab-4" class="wizard-stack" role="tabpanel" aria-label="Nieuw project">
           <modus-wc-card id="provision-card" bordered padding="compact">
             <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Nieuw project aanmaken uit template</modus-wc-typography>
             <div class="step-body">
@@ -287,7 +373,7 @@
           </modus-wc-card>
         </div>
 
-        <div slot="tab-4" class="wizard-stack" role="tabpanel" aria-label="Instellingen">
+        <div slot="tab-5" class="wizard-stack" role="tabpanel" aria-label="Instellingen">
           <modus-wc-card id="settings-card" bordered padding="compact">
             <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Instellingen</modus-wc-typography>
             <div class="step-body">
@@ -325,6 +411,27 @@
         </div>
       </modus-wc-card>
     </main>
+
+    <modus-wc-modal id="mapping-detail-modal" modal-id="mapping-detail-dialog" backdrop="default" position="center" show-close aria-label="Mapmetadata">
+      <span slot="header">Mapdetails en metadata</span>
+      <div slot="content" class="step-body">
+        <modus-wc-typography id="detail-local" size="sm">Lokale map: –</modus-wc-typography>
+        <modus-wc-typography id="detail-remote" size="sm">Remote: –</modus-wc-typography>
+        <modus-wc-typography id="detail-ids" size="sm">IDs: –</modus-wc-typography>
+        <modus-wc-text-input id="detail-erp" size="sm" label="ERP-projectcode"></modus-wc-text-input>
+        <modus-wc-text-input id="detail-description" size="sm" label="Omschrijving"></modus-wc-text-input>
+        <modus-wc-text-input id="detail-tags" size="sm" label="Tags" placeholder="Calculatie, Definitief"></modus-wc-text-input>
+        <modus-wc-number-input id="detail-interval" size="sm" label="Sync-interval (seconden)"></modus-wc-number-input>
+        <modus-wc-switch id="detail-write-tags" size="sm" label="Tags ook naar Trimble Connect schrijven"></modus-wc-switch>
+      </div>
+      <div slot="footer" class="action-row">
+        <modus-wc-button id="detail-cancel-btn" size="sm" color="tertiary" variant="outlined">Annuleren</modus-wc-button>
+        <modus-wc-button id="detail-save-btn" size="sm" color="primary" variant="filled">
+          <modus-wc-icon name="check" size="xs" decorative></modus-wc-icon>
+          Metadata opslaan
+        </modus-wc-button>
+      </div>
+    </modus-wc-modal>
 
     <modus-wc-modal id="folder-browser-modal" modal-id="folder-browser-dialog" backdrop="default" position="center" show-close aria-label="Lokale map kiezen">
       <span slot="header">Blader op netwerk / schijf</span>

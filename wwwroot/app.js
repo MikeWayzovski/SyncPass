@@ -59,6 +59,16 @@ const state = {
   cloneLocal: '/home/jack/Projecten/Sluis',
   watchRoot: '',
   autoProvision: false,
+  overviewJobs: [],
+  overviewStats: null,
+  overviewSearch: '',
+  overviewStatus: 'all',
+  selectedOverviewJob: null,
+  detailErp: '',
+  detailDescription: '',
+  detailTags: '',
+  detailInterval: '60',
+  detailWriteTags: false,
 };
 
 const els = {
@@ -73,6 +83,10 @@ const els = {
   headerAvatarFallback: document.getElementById('header-avatar-fallback'),
   headerUserName: document.getElementById('header-user-name'),
   loginBtn: document.getElementById('login-btn'),
+  firstRunCard: document.getElementById('first-run-card'),
+  firstRunCopy: document.getElementById('first-run-copy'),
+  firstRunLogin: document.getElementById('first-run-login-btn'),
+  firstRunLink: document.getElementById('first-run-link-btn'),
   projectSelect: document.getElementById('project-select'),
   collectionProject: document.getElementById('collection-project'),
   remoteTarget: document.getElementById('remote-target'),
@@ -121,6 +135,24 @@ const els = {
   kpiConnectionCopy: document.getElementById('kpi-connection-copy'),
   kpiProjectsCopy: document.getElementById('kpi-projects-copy'),
   kpiSharedCopy: document.getElementById('kpi-shared-copy'),
+  overviewSearch: document.getElementById('overview-search'),
+  overviewStatusFilter: document.getElementById('overview-status-filter'),
+  overviewTable: document.getElementById('overview-table'),
+  kpiMappingsCopy: document.getElementById('kpi-mappings-copy'),
+  kpiMappingsTotal: document.getElementById('kpi-mappings-total'),
+  kpiFilesCopy: document.getElementById('kpi-files-copy'),
+  kpiDiskCopy: document.getElementById('kpi-disk-copy'),
+  kpiActivityCopy: document.getElementById('kpi-activity-copy'),
+  detailLocal: document.getElementById('detail-local'),
+  detailRemote: document.getElementById('detail-remote'),
+  detailIds: document.getElementById('detail-ids'),
+  detailErp: document.getElementById('detail-erp'),
+  detailDescription: document.getElementById('detail-description'),
+  detailTags: document.getElementById('detail-tags'),
+  detailInterval: document.getElementById('detail-interval'),
+  detailWriteTags: document.getElementById('detail-write-tags'),
+  detailCancel: document.getElementById('detail-cancel-btn'),
+  detailSave: document.getElementById('detail-save-btn'),
   projectsTable: document.getElementById('projects-table'),
   sharedOverviewTable: document.getElementById('shared-overview-table'),
   sharedName: document.getElementById('shared-name'),
@@ -142,7 +174,7 @@ const els = {
   provisionSettingsBtn: document.getElementById('provision-settings-btn'),
 };
 
-['kpi-connection', 'kpi-projects', 'kpi-shared', 'inv-upload', 'inv-download', 'inv-synced', 'summary-card'].forEach((id) => {
+['kpi-connection', 'kpi-projects', 'kpi-shared', 'kpi-mappings', 'kpi-files', 'kpi-disk', 'kpi-activity', 'inv-upload', 'inv-download', 'inv-synced', 'summary-card'].forEach((id) => {
   const card = document.getElementById(id);
   if (card) {
     card.bordered = false;
@@ -573,6 +605,29 @@ function renderAuth(status) {
     els.kpiConnectionCopy.textContent = 'Log in om projecten te beheren.';
     els.loginBtn.hidden = false;
   }
+  renderFirstRun(status);
+}
+
+function renderFirstRun(status) {
+  if (!els.firstRunCard) {
+    return;
+  }
+  const configured = Boolean(status.configured);
+  els.firstRunCard.hidden = configured;
+  if (configured) {
+    return;
+  }
+  if (els.firstRunCopy) {
+    els.firstRunCopy.textContent = status.authenticated
+      ? 'Je bent ingelogd. Koppel nu een lokale map aan een Trimble Connect-project.'
+      : 'Deze connector is leeg. Log in met je Trimble ID en koppel daarna je eerste map.';
+  }
+  if (els.firstRunLogin) {
+    els.firstRunLogin.hidden = Boolean(status.authenticated);
+  }
+  if (els.firstRunLink) {
+    els.firstRunLink.hidden = !status.authenticated;
+  }
 }
 
 function renderLogs(status) {
@@ -796,7 +851,286 @@ async function refreshStatus() {
   state.status = await api('/api/setup/status');
   renderAuth(state.status);
   renderLogs(state.status);
+  await loadOverview().catch(() => undefined);
   return state.status;
+}
+
+const OVERVIEW_STATUS_OPTIONS = [
+  { label: 'Alle statussen', value: 'all' },
+  { label: 'In sync', value: 'OK' },
+  { label: 'Fout / waarschuwing', value: 'ERROR' },
+  { label: 'Gepauzeerd', value: 'PAUSED' },
+];
+
+function statusLabel(status) {
+  if (status === 'SYNCING') {
+    return 'Bezig';
+  }
+  if (status === 'ERROR') {
+    return 'Fout';
+  }
+  if (status === 'PAUSED') {
+    return 'Gepauzeerd';
+  }
+  return 'In sync';
+}
+
+function statusColor(status) {
+  if (status === 'SYNCING') {
+    return 'warning';
+  }
+  if (status === 'ERROR') {
+    return 'danger';
+  }
+  if (status === 'PAUSED') {
+    return 'tertiary';
+  }
+  return 'success';
+}
+
+function formatWhen(value) {
+  if (!value) {
+    return 'Nog niet gesynchroniseerd';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString('nl-NL');
+}
+
+function filteredOverviewJobs() {
+  const query = (state.overviewSearch || '').trim().toLowerCase();
+  return (state.overviewJobs || []).filter((job) => {
+    if (state.overviewStatus === 'ERROR' && job.syncStatus !== 'ERROR') {
+      return false;
+    }
+    if (state.overviewStatus === 'OK' && job.syncStatus !== 'OK' && job.syncStatus !== 'SYNCING') {
+      return false;
+    }
+    if (state.overviewStatus === 'PAUSED' && job.syncStatus !== 'PAUSED') {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+    const haystack = [
+      job.erpProjectId,
+      job.projectName,
+      job.remoteProjectName,
+      job.localFolderPath,
+      job.remoteFolderName,
+      job.remoteFolderPath,
+      job.description,
+      ...(job.tags || []),
+    ].join(' ').toLowerCase();
+    return haystack.includes(query);
+  });
+}
+
+function createText(size, text) {
+  const node = document.createElement('modus-wc-typography');
+  node.size = size;
+  node.textContent = text;
+  return node;
+}
+
+function iconButton(name, label, onClick) {
+  const button = document.createElement('modus-wc-button');
+  button.size = 'sm';
+  button.color = 'tertiary';
+  button.variant = 'borderless';
+  button.shape = 'square';
+  button.setAttribute('aria-label', label);
+  const icon = document.createElement('modus-wc-icon');
+  icon.name = name;
+  icon.size = 'xs';
+  icon.decorative = true;
+  button.append(icon);
+  bindButton(button, onClick);
+  return button;
+}
+
+function renderStatusCell(_value, row) {
+  const badge = document.createElement('modus-wc-badge');
+  badge.size = 'sm';
+  badge.variant = 'filled';
+  badge.color = statusColor(row.syncStatus);
+  badge.textContent = statusLabel(row.syncStatus);
+  return badge;
+}
+
+function renderLocalCell(_value, row) {
+  const wrap = document.createElement('div');
+  wrap.className = 'path-cell';
+  wrap.append(createText('sm', row.localFolderPath || '–'));
+  wrap.append(iconButton('copy', 'Kopieer lokaal pad', async () => {
+    try {
+      await navigator.clipboard.writeText(row.localFolderPath || '');
+      showAlert('success', 'Lokaal pad gekopieerd.');
+    } catch (error) {
+      showAlert('error', error.message);
+    }
+  }));
+  return wrap;
+}
+
+function renderRemoteCell(_value, row) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cell-stack';
+  wrap.append(createText('sm', row.remoteProjectName || row.projectName || '–'));
+  wrap.append(createText('sm', row.remoteFolderPath || '/'));
+  return wrap;
+}
+
+function renderTagsCell(_value, row) {
+  const wrap = document.createElement('div');
+  wrap.className = 'tag-row';
+  const tags = [...(row.erpProjectId ? [row.erpProjectId] : []), ...(row.tags || [])];
+  if (!tags.length) {
+    wrap.append(createText('sm', row.description || 'Geen tags'));
+    return wrap;
+  }
+  tags.forEach((tag) => {
+    const chip = document.createElement('modus-wc-chip');
+    chip.size = 'sm';
+    chip.variant = 'filled';
+    chip.label = tag;
+    wrap.append(chip);
+  });
+  return wrap;
+}
+
+function renderSyncCell(_value, row) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cell-stack';
+  wrap.append(createText('sm', formatWhen(row.lastSyncTime)));
+  wrap.append(createText('sm', `${row.totalFilesSynced ?? 0} bestanden · ${row.totalSizeMb ?? 0} MB`));
+  return wrap;
+}
+
+function renderActionCell(_value, row) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cell-actions';
+  wrap.append(iconButton('settings', 'Bewerk metadata', () => openMappingDetail(row)));
+  wrap.append(iconButton('notifications', 'Bekijk activiteit', () => {
+    window.location.href = '/activity';
+  }));
+  wrap.append(iconButton('refresh', 'Nu synchroniseren', () => overviewSync(row.jobId)));
+  wrap.append(iconButton(row.enabled ? 'pause' : 'play', row.enabled ? 'Pauzeer map' : 'Hervat map', () => overviewToggle(row.jobId)));
+  return wrap;
+}
+
+function renderOverviewStats(stats) {
+  state.overviewStats = stats;
+  if (els.kpiMappingsCopy) {
+    els.kpiMappingsCopy.textContent = String(stats.totalActiveMappings ?? 0);
+  }
+  if (els.kpiMappingsTotal) {
+    els.kpiMappingsTotal.textContent = `${stats.totalMappings ?? 0} mappen in totaal`;
+  }
+  if (els.kpiFilesCopy) {
+    els.kpiFilesCopy.textContent = String(stats.totalSyncedFiles ?? 0);
+  }
+  if (els.kpiDiskCopy) {
+    els.kpiDiskCopy.textContent = `${stats.diskUsageMb ?? 0} MB`;
+  }
+  if (els.kpiActivityCopy) {
+    const summary = stats.lastActivity
+      ? `${formatWhen(stats.lastActivity)}${stats.lastActivitySummary ? ` · ${stats.lastActivitySummary}` : ''}`
+      : 'Nog geen activiteit';
+    els.kpiActivityCopy.textContent = summary.length > 96 ? `${summary.slice(0, 95)}…` : summary;
+  }
+}
+
+function renderOverviewTable() {
+  if (!els.overviewTable) {
+    return;
+  }
+  els.overviewTable.columns = [
+    { id: 'syncStatus', header: 'Status', accessor: 'syncStatus', cellRenderer: renderStatusCell },
+    { id: 'localFolderPath', header: 'Lokale map', accessor: 'localFolderPath', cellRenderer: renderLocalCell },
+    { id: 'remoteFolderPath', header: 'Trimble-doel', accessor: 'remoteFolderPath', cellRenderer: renderRemoteCell },
+    { id: 'tags', header: 'Metadata & tags', accessor: 'tagsLabel', cellRenderer: renderTagsCell },
+    { id: 'lastSyncTime', header: 'Laatste sync', accessor: 'lastSyncLabel', cellRenderer: renderSyncCell },
+    { id: 'actions', header: 'Acties', accessor: 'actions', cellRenderer: renderActionCell },
+  ];
+  els.overviewTable.data = filteredOverviewJobs().map((job) => ({
+    ...job,
+    id: job.jobId,
+    tagsLabel: (job.tags || []).join(', '),
+    lastSyncLabel: formatWhen(job.lastSyncTime),
+    actions: '',
+  }));
+}
+
+async function loadOverview() {
+  const [jobs, stats] = await Promise.all([
+    api('/api/overview/jobs'),
+    api('/api/overview/stats'),
+  ]);
+  state.overviewJobs = Array.isArray(jobs) ? jobs : [];
+  renderOverviewStats(stats || {});
+  renderOverviewTable();
+}
+
+function mappingDetailDialog() {
+  return document.getElementById('mapping-detail-dialog');
+}
+
+function openMappingDetail(job) {
+  state.selectedOverviewJob = job;
+  state.detailErp = job.erpProjectId || '';
+  state.detailDescription = job.description || '';
+  state.detailTags = (job.tags || []).join(', ');
+  state.detailInterval = String(job.syncIntervalSeconds || 60);
+  state.detailWriteTags = false;
+  if (els.detailLocal) {
+    els.detailLocal.textContent = `Lokale map: ${job.localFolderPath || '–'}`;
+  }
+  if (els.detailRemote) {
+    els.detailRemote.textContent = `Remote: ${job.remoteProjectName || job.projectName} · ${job.remoteFolderPath || '/'}`;
+  }
+  if (els.detailIds) {
+    els.detailIds.textContent = `Project ${job.projectId || '–'} · map ${job.remoteFolderId || '–'} · job ${job.jobId}`;
+  }
+  if (els.detailErp) {
+    els.detailErp.value = state.detailErp;
+  }
+  if (els.detailDescription) {
+    els.detailDescription.value = state.detailDescription;
+  }
+  if (els.detailTags) {
+    els.detailTags.value = state.detailTags;
+  }
+  if (els.detailInterval) {
+    els.detailInterval.value = state.detailInterval;
+  }
+  if (els.detailWriteTags) {
+    els.detailWriteTags.value = false;
+  }
+  mappingDetailDialog()?.showModal();
+}
+
+function closeMappingDetail() {
+  mappingDetailDialog()?.close();
+}
+
+async function overviewToggle(jobId) {
+  await api('/api/overview/jobs/toggle', {
+    method: 'POST',
+    body: JSON.stringify({ jobId }),
+  });
+  await loadOverview();
+}
+
+async function overviewSync(jobId) {
+  await api('/api/overview/jobs/sync', {
+    method: 'POST',
+    body: JSON.stringify({ jobId }),
+  });
+  showAlert('success', 'Handmatige sync is gestart.');
+  await loadOverview();
 }
 
 async function validateStep(index) {
@@ -826,10 +1160,25 @@ async function validateStep(index) {
   return true;
 }
 
-bindButton(els.loginBtn, async () => {
+async function startLogin() {
   const { url } = await api('/api/setup/login-url');
   window.location.href = url;
-});
+}
+
+function startProjectWizard() {
+  state.projectId = '';
+  state.projectName = '';
+  state.jobId = '';
+  if (els.projectSelect) {
+    els.projectSelect.value = '';
+  }
+  setTab(2);
+  setWizardStep(0);
+}
+
+bindButton(els.loginBtn, startLogin);
+bindButton(els.firstRunLogin, startLogin);
+bindButton(els.firstRunLink, startProjectWizard);
 
 els.projectSelect.addEventListener('inputChange', async (event) => {
   const value = readInputString(event);
@@ -1014,20 +1363,83 @@ bindButton(els.confirmBtn, async () => {
 });
 
 bindButton(els.settingsBtn, () => {
-  setTab(4);
+  setTab(5);
 });
-bindButton(els.addProjectBtn, () => {
-  state.projectId = '';
-  state.projectName = '';
-  state.jobId = '';
-  if (els.projectSelect) {
-    els.projectSelect.value = '';
-  }
-  setTab(1);
-  setWizardStep(0);
-});
+bindButton(els.addProjectBtn, startProjectWizard);
 bindButton(els.activityBtn, () => {
   window.location.href = '/activity';
+});
+
+if (els.overviewStatusFilter) {
+  els.overviewStatusFilter.options = OVERVIEW_STATUS_OPTIONS;
+  els.overviewStatusFilter.value = state.overviewStatus;
+  els.overviewStatusFilter.addEventListener('inputChange', (event) => {
+    state.overviewStatus = readInputString(event) || 'all';
+    els.overviewStatusFilter.value = state.overviewStatus;
+    renderOverviewTable();
+  });
+}
+if (els.overviewSearch) {
+  els.overviewSearch.addEventListener('inputChange', (event) => {
+    state.overviewSearch = readInputString(event);
+    els.overviewSearch.value = state.overviewSearch;
+    renderOverviewTable();
+  });
+}
+if (els.detailErp) {
+  els.detailErp.addEventListener('inputChange', (event) => {
+    state.detailErp = readInputString(event);
+    els.detailErp.value = state.detailErp;
+  });
+}
+if (els.detailDescription) {
+  els.detailDescription.addEventListener('inputChange', (event) => {
+    state.detailDescription = readInputString(event);
+    els.detailDescription.value = state.detailDescription;
+  });
+}
+if (els.detailTags) {
+  els.detailTags.addEventListener('inputChange', (event) => {
+    state.detailTags = readInputString(event);
+    els.detailTags.value = state.detailTags;
+  });
+}
+if (els.detailInterval) {
+  els.detailInterval.addEventListener('inputChange', (event) => {
+    state.detailInterval = readInputString(event);
+    els.detailInterval.value = state.detailInterval;
+  });
+}
+if (els.detailWriteTags) {
+  els.detailWriteTags.addEventListener('inputChange', (event) => {
+    state.detailWriteTags = readInputChecked(event);
+    els.detailWriteTags.value = state.detailWriteTags;
+  });
+}
+bindButton(els.detailCancel, () => closeMappingDetail());
+bindButton(els.detailSave, async () => {
+  if (!state.selectedOverviewJob) {
+    return;
+  }
+  try {
+    const tags = state.detailTags.split(',').map((tag) => tag.trim()).filter(Boolean);
+    await api('/api/overview/jobs/metadata', {
+      method: 'PUT',
+      body: JSON.stringify({
+        jobId: state.selectedOverviewJob.jobId,
+        erpProjectId: state.detailErp,
+        description: state.detailDescription,
+        tags,
+        syncIntervalSeconds: Number(state.detailInterval) || 60,
+        writeConnectTags: state.detailWriteTags,
+      }),
+    });
+    closeMappingDetail();
+    showAlert('success', 'Mapmetadata is opgeslagen.');
+    await loadOverview();
+  } catch (error) {
+    showAlert('error', error.message);
+  }
 });
 
 els.sharedDirection.options = DIRECTION_OPTIONS;
@@ -1041,7 +1453,8 @@ renderMappingRows();
 
 els.tabs.tabs = [
   { label: 'Overzicht', icon: 'home', iconPosition: 'left' },
-  { label: 'Project koppelen', icon: 'folder_closed', iconPosition: 'left' },
+  { label: 'Mappen & projecten', icon: 'folder_closed', iconPosition: 'left' },
+  { label: 'Project koppelen', icon: 'folder_open', iconPosition: 'left' },
   { label: 'Centrale mappen', icon: 'link', iconPosition: 'left', disabled: true },
   { label: 'Nieuw project', icon: 'add', iconPosition: 'left' },
   { label: 'Instellingen', icon: 'settings', iconPosition: 'left' },
@@ -1103,7 +1516,7 @@ els.projectsTable.addEventListener('rowClick', async (event) => {
   if (els.projectSelect) {
     els.projectSelect.value = '';
   }
-  setTab(1);
+  setTab(2);
   setWizardStep(0);
   await scanLocal().catch(() => undefined);
 });

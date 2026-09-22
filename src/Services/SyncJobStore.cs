@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TrimbleConnector.Config;
+using TrimbleConnector.Models;
 
 namespace TrimbleConnector.Services;
 
@@ -255,7 +256,8 @@ public sealed class SyncJobStore
                         RemoteFolderId = remoteId?.Trim() ?? string.Empty,
                         SyncIntervalSeconds = job.SyncIntervalSeconds,
                         Direction = mapping.Direction,
-                        Enabled = job.Enabled
+                        Enabled = job.Enabled && mapping.Enabled,
+                        Metadata = CopyMetadata(mapping.Metadata ?? job.Metadata)
                     });
                 }
 
@@ -431,12 +433,26 @@ public sealed class SyncJobStore
         SyncIntervalSeconds = job.SyncIntervalSeconds,
         Direction = job.Direction,
         Enabled = job.Enabled,
+        Metadata = CopyMetadata(job.Metadata),
         FolderMappings = job.FolderMappings.Select(mapping => new FolderMapping
         {
             LocalSubPath = mapping.LocalSubPath,
             RemoteFolderPath = mapping.RemoteFolderPath,
             RemoteFolderId = mapping.RemoteFolderId,
-            Direction = mapping.Direction
+            Direction = mapping.Direction,
+            Enabled = mapping.Enabled,
+            Metadata = CopyMetadata(mapping.Metadata)
         }).ToList()
+    };
+
+    private static FolderMetadata CopyMetadata(FolderMetadata? source) => new()
+    {
+        ErpProjectId = source?.ErpProjectId,
+        Description = source?.Description,
+        Tags = source?.Tags?.Where(tag => !string.IsNullOrWhiteSpace(tag)).Select(tag => tag.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [],
+        LastSyncTime = source?.LastSyncTime,
+        TotalFilesSynced = source?.TotalFilesSynced ?? 0,
+        TotalSizeMb = source?.TotalSizeMb ?? 0,
+        SyncStatus = string.IsNullOrWhiteSpace(source?.SyncStatus) ? FolderSyncStatus.Ok : source.SyncStatus
     };
 }

@@ -149,6 +149,48 @@ public sealed class SyncStateRepository : IDisposable
         }
     }
 
+    public FolderFileStats GetFileStats(string scope)
+    {
+        lock (_gate)
+        {
+            using var command = _connection.CreateCommand();
+            command.CommandText =
+                """
+                SELECT COUNT(*), MAX(LastSyncedAtUtc)
+                FROM FileStates
+                WHERE ProjectId = $scope;
+                """;
+            command.Parameters.AddWithValue("$scope", scope);
+            using var reader = command.ExecuteReader();
+            if (!reader.Read())
+            {
+                return new FolderFileStats(0, null);
+            }
+
+            var count = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
+            var last = reader.IsDBNull(1) ? (DateTime?)null : ParseTime(reader.GetString(1));
+            return new FolderFileStats(count, last is null or { Year: < 2000 } ? null : last);
+        }
+    }
+
+    public FolderFileStats GetGlobalFileStats()
+    {
+        lock (_gate)
+        {
+            using var command = _connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*), MAX(LastSyncedAtUtc) FROM FileStates;";
+            using var reader = command.ExecuteReader();
+            if (!reader.Read())
+            {
+                return new FolderFileStats(0, null);
+            }
+
+            var count = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
+            var last = reader.IsDBNull(1) ? (DateTime?)null : ParseTime(reader.GetString(1));
+            return new FolderFileStats(count, last is null or { Year: < 2000 } ? null : last);
+        }
+    }
+
     public IReadOnlyList<ActivityLog> GetRecentActivities(int limit = 50)
     {
         if (limit < 1)

@@ -1,13 +1,22 @@
 using System.Net.Http.Headers;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Options;
 using TrimbleConnector;
 using TrimbleConnector.Config;
 using TrimbleConnector.Endpoints;
 using TrimbleConnector.Services;
 
-IHost host = Host.CreateDefaultBuilder(args)
+var builder = Host.CreateDefaultBuilder(args)
     .UseWindowsService()
-    .UseSystemd()
+    .UseSystemd();
+
+if (WindowsServiceHelpers.IsWindowsService())
+{
+    // A Windows Service starts with cwd System32. Keep wwwroot, data, and appsettings next to the exe.
+    builder.UseContentRoot(AppContext.BaseDirectory);
+}
+
+IHost host = builder
     .ConfigureServices((context, services) =>
     {
         services.AddWindowsService(options =>

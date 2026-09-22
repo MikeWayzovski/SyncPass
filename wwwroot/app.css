@@ -117,6 +117,25 @@ body {
   gap: 0.5rem;
 }
 
+.action-row-start {
+  justify-content: flex-start;
+}
+
+.first-run-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.first-run-steps li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
@@ -127,6 +146,10 @@ body {
 .table-wrap {
   min-width: 0;
   overflow: auto;
+}
+
+#overview-table {
+  min-width: 64rem;
 }
 
 .inventory-table {
@@ -196,4 +219,45 @@ body {
 
 .summary-list {
   gap: 0.35rem;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.filter-row modus-wc-text-input,
+.filter-row modus-wc-select {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.cell-stack,
+.cell-actions,
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.cell-stack {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.path-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.path-cell modus-wc-typography {
+  min-width: 0;
+  word-break: break-all;
 }

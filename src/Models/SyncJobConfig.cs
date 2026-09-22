@@ -69,6 +69,10 @@ public sealed class FolderMapping
 
     public SyncDirection Direction { get; set; } = SyncDirection.TwoWay;
 
+    public bool Enabled { get; set; } = true;
+
+    public FolderMetadata Metadata { get; set; } = new();
+
     public bool HasRemoteTarget =>
         !string.IsNullOrWhiteSpace(RemoteFolderPath)
         || !string.IsNullOrWhiteSpace(RemoteFolderId);
