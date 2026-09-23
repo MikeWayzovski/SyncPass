@@ -9,7 +9,7 @@ namespace TrimbleConnector.Services;
 
 /// <summary>
 /// Builds the Trimble Identity authorize URL and exchanges the callback code
-/// for tokens. The ASP.NET /callback route hosts the redirect (port 5000).
+/// for tokens. The dashboard /callback route uses the configured listen port.
 /// </summary>
 public sealed class AuthSetupHelper
 {
@@ -50,9 +50,7 @@ public sealed class AuthSetupHelper
             ? "https://id.trimble.com/oauth/authorize"
             : options.AuthUrl;
         var scope = string.IsNullOrWhiteSpace(options.Scope) ? "openid trimble-connector-sync" : options.Scope;
-        var redirect = string.IsNullOrWhiteSpace(options.RedirectUri)
-            ? "http://localhost:5000/callback"
-            : options.RedirectUri;
+        var redirect = options.EffectiveRedirectUri;
 
         return authUrl
             + "?response_type=code"
@@ -119,7 +117,7 @@ public sealed class AuthSetupHelper
             ["grant_type"] = "authorization_code",
             ["code"] = code,
             ["client_id"] = options.ClientId,
-            ["redirect_uri"] = options.RedirectUri
+            ["redirect_uri"] = options.EffectiveRedirectUri
         });
 
         var client = _httpClientFactory.CreateClient("TrimbleIdentity");

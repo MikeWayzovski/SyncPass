@@ -17,6 +17,9 @@ public sealed class ConnectUser
     [JsonPropertyName("email")]
     public string? Email { get; set; }
 
+    [JsonPropertyName("hasImage")]
+    public bool? HasImage { get; set; }
+
     [JsonPropertyName("displayName")]
     public string? DisplayName { get; set; }
 
@@ -91,6 +94,8 @@ public sealed class SetupUserDto
 
     public string? Email { get; set; }
 
+    public bool? HasImage { get; set; }
+
     public string? Thumbnail { get; set; }
 }
 
@@ -113,6 +118,8 @@ public sealed class SetupJobStatus
     public int SyncIntervalSeconds { get; set; }
 
     public string State { get; set; } = "idle";
+
+    public DateTimeOffset? LastSyncedAtUtc { get; set; }
 }
 
 public sealed class ProvisionProjectRequest

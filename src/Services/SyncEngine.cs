@@ -192,7 +192,7 @@ public sealed class SyncEngine
                     UpdateStatus(context.Job, "syncing");
                     await SyncJobAsync(context, cancellationToken).ConfigureAwait(false);
                     SaveState(context);
-                    UpdateStatus(context.Job, "idle");
+                    UpdateStatus(context.Job, "idle", stampSync: true);
                     _logs.Add($"Sync cycle finished for {context.Job.ProjectId}.");
                     if (context.Job.Interval < wait)
                     {
@@ -642,6 +642,27 @@ public sealed class SyncEngine
 
     private async Task<string> ResolveRemoteFolderAsync(SyncJobOptions job, CancellationToken cancellationToken)
     {
+        if (!string.IsNullOrWhiteSpace(job.TargetFolderName))
+        {
+            var rootId = await _api.ResolveOrCreateFolderAsync(job.ProjectId, "/", cancellationToken).ConfigureAwait(false);
+            var folderId = await _api.GetOrCreateFolderByNameAsync(
+                    job.ProjectId,
+                    rootId,
+                    job.TargetFolderName,
+                    job.AutoCreateRemoteFolder,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(folderId))
+            {
+                throw new InvalidOperationException(
+                    $"Doelmap '{job.TargetFolderName}' bestaat niet in project {job.ProjectId}.");
+            }
+
+            job.RemoteFolderId = folderId;
+            job.RemoteFolderPath = "/" + job.TargetFolderName.Trim().Trim('/');
+            return folderId;
+        }
+
         if (!RemotePath.IsRoot(job.RemoteFolderPath))
         {
             var created = await _api.ResolveOrCreateFolderAsync(
@@ -690,7 +711,7 @@ public sealed class SyncEngine
         return await _api.ResolveOrCreateFolderAsync(job.ProjectId, remotePath, cancellationToken).ConfigureAwait(false);
     }
 
-    private void UpdateStatus(SyncJobOptions job, string state)
+    private void UpdateStatus(SyncJobOptions job, string state, bool stampSync = false)
     {
         lock (_statusLock)
         {
@@ -699,13 +720,23 @@ public sealed class SyncEngine
                 || (item.ProjectId == job.ProjectId
                     && item.LocalFolderPath == job.LocalFolderPath
                     && item.RemoteFolderId == job.EffectiveRemoteFolderId));
+            var next = ToStatus(job, state);
+            if (stampSync)
+            {
+                next.LastSyncedAtUtc = DateTimeOffset.UtcNow;
+            }
+            else if (match?.LastSyncedAtUtc is not null)
+            {
+                next.LastSyncedAtUtc = match.LastSyncedAtUtc;
+            }
+
             if (match is not null)
             {
-                _status[_status.IndexOf(match)] = ToStatus(job, state);
+                _status[_status.IndexOf(match)] = next;
             }
             else
             {
-                _status.Add(ToStatus(job, state));
+                _status.Add(next);
             }
         }
     }

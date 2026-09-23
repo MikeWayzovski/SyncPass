@@ -41,6 +41,6 @@ echo Factory appsettings.json has no jobs, tokens, or developer folders.
 echo Copied install-service.bat and uninstall-service.bat into publish\win-x64
 echo.
 echo Next steps:
-echo   1. Compile TrimbleConnectorSetup.iss with Inno Setup to build TrimbleConnector-Setup-v2.3.2.exe
+echo   1. Compile TrimbleConnectorSetup.iss with Inno Setup to build TrimbleConnector-Setup-v2.5.5.exe
 echo   2. Or run publish\win-x64\install-service.bat as Administrator
 endlocal

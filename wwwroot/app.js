@@ -17,6 +17,20 @@ const WIZARD_STEPS = [
   { label: 'Uitvoering' },
 ];
 
+const SHARED_STEPS = [
+  { label: 'Lokale map' },
+  { label: 'Doelmap' },
+  { label: 'Projecten' },
+  { label: 'Overzicht' },
+];
+
+const PROVISION_STEPS = [
+  { label: 'Template' },
+  { label: 'Lokale map' },
+  { label: 'ERP-watch' },
+  { label: 'Overzicht' },
+];
+
 const DEFAULT_DIRECTION_OPTIONS = [
   { label: 'Lokaal naar cloud', value: 'LocalToCloud' },
   { label: 'Twee-richtingen', value: 'TwoWay' },
@@ -46,17 +60,22 @@ const state = {
   browseParent: '',
   defaultDirection: 'LocalToCloud',
   defaultRemoteParent: '/',
+  listenPort: '5000',
   remoteFolderName: '',
+  sharedRuleId: '',
   sharedName: '',
   sharedPath: '',
-  sharedDirection: 'LocalToCloud',
-  sharedTargets: [],
-  selectedTarget: -1,
+  sharedFolderName: '99_Algemeen',
+  sharedProjectIds: [],
+  sharedAutoCreate: true,
+  sharedStep: 0,
+  provisionStep: 0,
+  browseTarget: 'link',
   templateId: '',
   templateName: '',
   cloneName: '',
   cloneDescription: '',
-  cloneLocal: '/home/jack/Projecten/Sluis',
+  cloneLocal: '',
   watchRoot: '',
   autoProvision: false,
   overviewJobs: [],
@@ -69,6 +88,7 @@ const state = {
   detailTags: '',
   detailInterval: '60',
   detailWriteTags: false,
+  restoreFile: null,
 };
 
 const els = {
@@ -124,6 +144,17 @@ const els = {
   prefDirection: document.getElementById('pref-direction'),
   prefRemoteParent: document.getElementById('pref-remote-parent'),
   prefSave: document.getElementById('pref-save-btn'),
+  listenPort: document.getElementById('listen-port'),
+  portNotice: document.getElementById('port-notice'),
+  portSave: document.getElementById('port-save-btn'),
+  lanBanner: document.getElementById('lan-banner'),
+  lanLink: document.getElementById('lan-link'),
+  backupDownloadBtn: document.getElementById('backup-download-btn'),
+  restoreDropzone: document.getElementById('restore-dropzone'),
+  restoreAlert: document.getElementById('restore-alert'),
+  restoreBtn: document.getElementById('restore-btn'),
+  restoreCancelBtn: document.getElementById('restore-cancel-btn'),
+  restoreConfirmBtn: document.getElementById('restore-confirm-btn'),
   settingsBtn: document.getElementById('settings-btn'),
   activityBtn: document.getElementById('activity-btn'),
   addProjectBtn: document.getElementById('add-project-btn'),
@@ -156,25 +187,47 @@ const els = {
   projectsTable: document.getElementById('projects-table'),
   sharedOverviewTable: document.getElementById('shared-overview-table'),
   sharedName: document.getElementById('shared-name'),
-  sharedPath: document.getElementById('shared-path'),
-  sharedProject: document.getElementById('shared-project'),
-  sharedFolder: document.getElementById('shared-folder'),
-  sharedDirection: document.getElementById('shared-direction'),
-  sharedAddBtn: document.getElementById('shared-add-btn'),
-  sharedRemoveBtn: document.getElementById('shared-remove-btn'),
+  sharedPathLabel: document.getElementById('shared-path-label'),
+  sharedScanCopy: document.getElementById('shared-scan-copy'),
+  sharedBrowseBtn: document.getElementById('shared-browse-btn'),
+  sharedFolderName: document.getElementById('shared-folder-name'),
+  sharedProjectList: document.getElementById('shared-project-list'),
+  sharedAutocreate: document.getElementById('shared-autocreate'),
+  sharedStepper: document.getElementById('shared-stepper'),
+  sharedHeading: document.getElementById('shared-heading'),
+  sharedBack: document.getElementById('shared-back-btn'),
+  sharedNext: document.getElementById('shared-next-btn'),
+  sharedNewBtn: document.getElementById('shared-new-btn'),
+  sharedDeleteBtn: document.getElementById('shared-delete-btn'),
   sharedSaveBtn: document.getElementById('shared-save-btn'),
+  sharedSummaryName: document.getElementById('shared-summary-name'),
+  sharedSummaryLocal: document.getElementById('shared-summary-local'),
+  sharedSummaryFolder: document.getElementById('shared-summary-folder'),
+  sharedSummaryProjects: document.getElementById('shared-summary-projects'),
+  sharedSummaryCreate: document.getElementById('shared-summary-create'),
   sharedTable: document.getElementById('shared-table'),
   templateSelect: document.getElementById('template-select'),
   cloneName: document.getElementById('clone-name'),
   cloneDescription: document.getElementById('clone-description'),
-  cloneLocal: document.getElementById('clone-local'),
-  watchRoot: document.getElementById('watch-root'),
+  clonePathLabel: document.getElementById('clone-path-label'),
+  cloneBrowseBtn: document.getElementById('clone-browse-btn'),
+  watchPathLabel: document.getElementById('watch-path-label'),
+  watchBrowseBtn: document.getElementById('watch-browse-btn'),
+  watchClearBtn: document.getElementById('watch-clear-btn'),
   autoProvision: document.getElementById('auto-provision'),
   cloneBtn: document.getElementById('clone-btn'),
   provisionSettingsBtn: document.getElementById('provision-settings-btn'),
+  provisionStepper: document.getElementById('provision-stepper'),
+  provisionHeading: document.getElementById('provision-heading'),
+  provisionBack: document.getElementById('provision-back-btn'),
+  provisionNext: document.getElementById('provision-next-btn'),
+  provisionSummaryName: document.getElementById('provision-summary-name'),
+  provisionSummaryTemplate: document.getElementById('provision-summary-template'),
+  provisionSummaryLocal: document.getElementById('provision-summary-local'),
+  provisionSummaryWatch: document.getElementById('provision-summary-watch'),
 };
 
-['kpi-connection', 'kpi-projects', 'kpi-shared', 'kpi-mappings', 'kpi-files', 'kpi-disk', 'kpi-activity', 'inv-upload', 'inv-download', 'inv-synced', 'summary-card'].forEach((id) => {
+['kpi-connection', 'kpi-projects', 'kpi-shared', 'kpi-mappings', 'kpi-files', 'kpi-disk', 'kpi-activity', 'inv-upload', 'inv-download', 'inv-synced', 'summary-card', 'shared-summary-card', 'provision-summary-card'].forEach((id) => {
   const card = document.getElementById(id);
   if (card) {
     card.bordered = false;
@@ -427,15 +480,263 @@ function renderInventory(result) {
   renderStepper();
 }
 
+function ruleProjectIds(rule) {
+  const ids = (rule.targetProjectIds || []).filter(Boolean);
+  if (ids.length) {
+    return ids;
+  }
+  return (rule.syncTargets || []).map((target) => target.projectId).filter(Boolean);
+}
+
+function formatSyncTime(value) {
+  if (!value) {
+    return 'Nog niet';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Nog niet';
+  }
+  return formatLocalTimestamp(date);
+}
+
+function ruleLastSync(rule) {
+  const ids = new Set(ruleProjectIds(rule));
+  const local = (rule.localFolderPath || '').replace(/\\/g, '/').toLowerCase();
+  const stamps = (state.status?.jobs || [])
+    .filter((job) => {
+      const jobLocal = (job.localFolderPath || '').replace(/\\/g, '/').toLowerCase();
+      return jobLocal === local && (!ids.size || ids.has(job.projectId));
+    })
+    .map((job) => new Date(job.lastSyncedAtUtc).getTime())
+    .filter((value) => !Number.isNaN(value));
+  if (!stamps.length) {
+    return null;
+  }
+  return new Date(Math.max(...stamps)).toISOString();
+}
+
+function renderSharedProjectChecks() {
+  const root = els.sharedProjectList;
+  if (!root) {
+    return;
+  }
+  root.replaceChildren();
+  if (!state.projects.length) {
+    const empty = document.createElement('modus-wc-typography');
+    empty.size = 'sm';
+    empty.textContent = 'Log in om projecten te kiezen.';
+    root.append(empty);
+    return;
+  }
+  const selected = new Set(state.sharedProjectIds);
+  state.projects.forEach((project) => {
+    const box = document.createElement('modus-wc-checkbox');
+    box.size = 'sm';
+    box.label = project.name || project.id;
+    box.value = selected.has(project.id);
+    box.addEventListener('inputChange', (event) => {
+      const checked = readInputChecked(event);
+      const ids = new Set(state.sharedProjectIds);
+      if (checked) {
+        ids.add(project.id);
+      } else {
+        ids.delete(project.id);
+      }
+      state.sharedProjectIds = [...ids];
+      box.value = checked;
+    });
+    root.append(box);
+  });
+}
+
+function renderSharedPath() {
+  els.sharedPathLabel.textContent = state.sharedPath || 'Nog geen map gekozen.';
+}
+
+function renderClonePath() {
+  els.clonePathLabel.textContent = state.cloneLocal || 'Nog geen map gekozen.';
+}
+
+function renderWatchPath() {
+  els.watchPathLabel.textContent = state.watchRoot || 'Geen ERP-watchmap.';
+}
+
+function renderSharedSummary() {
+  const names = state.sharedProjectIds
+    .map((id) => projectById(id)?.name || id)
+    .filter(Boolean);
+  els.sharedSummaryName.textContent = `Naam: ${state.sharedName || '–'}`;
+  els.sharedSummaryLocal.textContent = `Lokale bron: ${state.sharedPath || '–'}`;
+  els.sharedSummaryFolder.textContent = `Doelmap: ${state.sharedFolderName || '99_Algemeen'}`;
+  els.sharedSummaryProjects.textContent = names.length
+    ? `Projecten: ${names.join(', ')}`
+    : 'Projecten: –';
+  els.sharedSummaryCreate.textContent = state.sharedAutoCreate !== false
+    ? 'Automatisch aanmaken: ja'
+    : 'Automatisch aanmaken: nee';
+}
+
+function renderSharedStepper() {
+  els.sharedStepper.steps = SHARED_STEPS.map((step, index) => ({
+    label: step.label,
+    content: String(index + 1),
+    color: index < state.sharedStep ? 'primary' : index === state.sharedStep ? 'info' : 'neutral',
+  }));
+  els.sharedHeading.textContent = `Stap ${state.sharedStep + 1}: ${SHARED_STEPS[state.sharedStep].label}`;
+  for (let index = 0; index < SHARED_STEPS.length; index += 1) {
+    const panel = document.getElementById(`shared-step-${index}`);
+    if (!panel) {
+      continue;
+    }
+    const inactive = index !== state.sharedStep;
+    panel.classList.toggle('hidden', inactive);
+    panel.toggleAttribute('hidden', inactive);
+  }
+  els.sharedBack.hidden = state.sharedStep === 0;
+  els.sharedNext.hidden = state.sharedStep >= SHARED_STEPS.length - 1;
+  els.sharedSaveBtn.hidden = state.sharedStep !== SHARED_STEPS.length - 1;
+  els.sharedDeleteBtn.hidden = !state.sharedRuleId;
+  if (state.sharedStep === 2) {
+    renderSharedProjectChecks();
+  }
+  if (state.sharedStep === 3) {
+    renderSharedSummary();
+  }
+  renderSharedPath();
+}
+
+function setSharedStep(index) {
+  state.sharedStep = Math.max(0, Math.min(SHARED_STEPS.length - 1, index));
+  renderSharedStepper();
+}
+
+function sharedStepReady(index) {
+  if (index === 0) {
+    if (!state.sharedName || !state.sharedPath) {
+      showAlert('error', 'Vul een naam in en kies een lokale map.');
+      return false;
+    }
+    return true;
+  }
+  if (index === 1) {
+    if (!state.sharedFolderName) {
+      showAlert('error', 'Vul de doelmap in Trimble Connect in.');
+      return false;
+    }
+    return true;
+  }
+  if (index === 2 && !state.sharedProjectIds.length) {
+    showAlert('error', 'Kies minstens één Trimble Connect-project.');
+    return false;
+  }
+  return true;
+}
+
+function renderProvisionSummary() {
+  els.provisionSummaryName.textContent = `Project: ${state.cloneName || '–'}`;
+  els.provisionSummaryTemplate.textContent = `Template: ${state.templateName || '–'}`;
+  els.provisionSummaryLocal.textContent = `Lokale map: ${state.cloneLocal || '–'}`;
+  els.provisionSummaryWatch.textContent = `ERP-watchmap: ${state.watchRoot || 'geen'}`;
+}
+
+function renderProvisionStepper() {
+  els.provisionStepper.steps = PROVISION_STEPS.map((step, index) => ({
+    label: step.label,
+    content: String(index + 1),
+    color: index < state.provisionStep ? 'primary' : index === state.provisionStep ? 'info' : 'neutral',
+  }));
+  els.provisionHeading.textContent = `Stap ${state.provisionStep + 1}: ${PROVISION_STEPS[state.provisionStep].label}`;
+  for (let index = 0; index < PROVISION_STEPS.length; index += 1) {
+    const panel = document.getElementById(`provision-step-${index}`);
+    if (!panel) {
+      continue;
+    }
+    const inactive = index !== state.provisionStep;
+    panel.classList.toggle('hidden', inactive);
+    panel.toggleAttribute('hidden', inactive);
+  }
+  const last = state.provisionStep >= PROVISION_STEPS.length - 1;
+  els.provisionBack.hidden = state.provisionStep === 0;
+  els.provisionNext.hidden = last;
+  els.provisionSettingsBtn.hidden = !last;
+  els.cloneBtn.hidden = !last;
+  if (last) {
+    renderProvisionSummary();
+  }
+  renderClonePath();
+  renderWatchPath();
+}
+
+function setProvisionStep(index) {
+  state.provisionStep = Math.max(0, Math.min(PROVISION_STEPS.length - 1, index));
+  renderProvisionStepper();
+}
+
+function provisionStepReady(index) {
+  if (index === 0) {
+    if (!state.templateId || !state.cloneName) {
+      showAlert('error', 'Kies een template en vul een projectnaam in.');
+      return false;
+    }
+    return true;
+  }
+  if (index === 1 && !state.cloneLocal) {
+    showAlert('error', 'Kies de lokale projectmap.');
+    return false;
+  }
+  return true;
+}
+
+function resetSharedForm() {
+  state.sharedRuleId = '';
+  state.sharedName = '';
+  state.sharedPath = '';
+  state.sharedFolderName = '99_Algemeen';
+  state.sharedProjectIds = [];
+  state.sharedAutoCreate = true;
+  els.sharedName.value = '';
+  els.sharedFolderName.value = '99_Algemeen';
+  els.sharedAutocreate.value = true;
+  if (els.sharedScanCopy) {
+    els.sharedScanCopy.textContent = 'Nog niet gekozen.';
+  }
+  renderSharedProjectChecks();
+  setSharedStep(0);
+}
+
+function loadSharedForm(rule) {
+  state.sharedRuleId = rule.ruleId || '';
+  state.sharedName = rule.name || '';
+  state.sharedPath = rule.localFolderPath || '';
+  state.sharedFolderName = rule.targetFolderName || '99_Algemeen';
+  state.sharedProjectIds = ruleProjectIds(rule);
+  state.sharedAutoCreate = rule.autoCreateRemoteFolder !== false;
+  els.sharedName.value = state.sharedName;
+  els.sharedFolderName.value = state.sharedFolderName;
+  els.sharedAutocreate.value = state.sharedAutoCreate;
+  if (els.sharedScanCopy) {
+    els.sharedScanCopy.textContent = state.sharedPath || 'Nog niet gekozen.';
+  }
+  renderSharedProjectChecks();
+  setSharedStep(0);
+}
+
 function renderSharedTable() {
+  const rules = state.config?.sharedSyncRules || [];
   els.sharedTable.columns = [
-    { id: 'projectName', header: 'Project', accessor: 'projectName' },
-    { id: 'remoteFolderPath', header: 'Remote pad', accessor: 'remoteFolderPath' },
+    { id: 'name', header: 'Naam', accessor: 'name' },
+    { id: 'localFolderPath', header: 'Lokale map', accessor: 'localFolderPath' },
+    { id: 'targetFolderName', header: 'Doelmap', accessor: 'targetFolderName' },
+    { id: 'projects', header: 'Projecten', accessor: 'projects' },
+    { id: 'lastSync', header: 'Laatste sync', accessor: 'lastSync' },
   ];
-  els.sharedTable.data = state.sharedTargets.map((row, index) => ({
-    id: String(index),
-    projectName: row.projectName || projectById(row.projectId)?.name || 'Project',
-    remoteFolderPath: row.remoteFolderPath || '/',
+  els.sharedTable.data = rules.map((rule, index) => ({
+    id: rule.ruleId || String(index),
+    name: rule.name || 'Centrale map',
+    localFolderPath: rule.localFolderPath || '',
+    targetFolderName: rule.targetFolderName || '99_Algemeen',
+    projects: String(ruleProjectIds(rule).length),
+    lastSync: formatSyncTime(ruleLastSync(rule)),
   }));
 }
 
@@ -468,13 +769,12 @@ function renderDashboard() {
     { id: 'targets', header: 'Doelen', accessor: 'targets' },
   ];
   els.sharedOverviewTable.data = rules.map((rule, index) => ({
-    id: String(index),
+    id: rule.ruleId || String(index),
     name: rule.name,
     localFolderPath: rule.localFolderPath,
-    targets: (rule.syncTargets || [])
-      .map((target) => `${target.projectName || projectById(target.projectId)?.name || 'Project'} → ${target.remoteFolderPath || '/'}`)
-      .join(', ') || 'Geen doelen',
+    targets: `${rule.targetFolderName || '99_Algemeen'} · ${ruleProjectIds(rule).length} projecten`,
   }));
+  renderSharedTable();
 }
 
 function applyConfig(config) {
@@ -488,26 +788,12 @@ function applyConfig(config) {
   if (els.prefRemoteParent) {
     els.prefRemoteParent.value = state.defaultRemoteParent === '/' ? '' : state.defaultRemoteParent;
   }
-  const shared = config.sharedSyncRules?.[0];
-  if (shared) {
-    state.sharedName = shared.name || '';
-    state.sharedPath = shared.localFolderPath || '';
-    state.sharedDirection = shared.direction || 'LocalToCloud';
-    state.sharedTargets = (shared.syncTargets || []).map((row) => ({
-      projectName: row.projectName || '',
-      projectId: row.projectId || '',
-      remoteFolderPath: row.remoteFolderPath || '/',
-    }));
-    els.sharedName.value = state.sharedName;
-    els.sharedPath.value = state.sharedPath;
-    els.sharedDirection.value = state.sharedDirection;
-  }
   const provisioning = config.projectProvisioning || {};
   state.templateId = provisioning.defaultTemplateProjectId || state.templateId;
   state.templateName = provisioning.defaultTemplateProjectName || state.templateName;
   state.watchRoot = provisioning.watchRoot || '';
   state.autoProvision = Boolean(provisioning.autoProvisionOnFolderTrigger);
-  els.watchRoot.value = state.watchRoot;
+  renderWatchPath();
   els.autoProvision.value = state.autoProvision;
   if (state.templateId) {
     els.templateSelect.value = state.templateId;
@@ -551,24 +837,22 @@ function displayName(status) {
   return full || status.userName || user.email || status.userEmail || 'Trimble ID';
 }
 
-function applyAvatar(img, fallback, url, name) {
+function applyAvatar(img, fallback, enabled, name) {
   img.onerror = () => {
+    img.removeAttribute('src');
     img.hidden = true;
     fallback.hidden = false;
   };
-  const next = url ? (url.startsWith('http') ? '/api/setup/avatar' : url) : '';
-  if (!next) {
+  if (!enabled) {
     img.removeAttribute('src');
     img.alt = '';
     img.hidden = true;
     fallback.hidden = false;
     return;
   }
-  if (img.getAttribute('src') === next && !img.hidden) {
-    img.alt = name;
-    return;
+  if (img.getAttribute('src') !== '/api/user/avatar') {
+    img.src = '/api/user/avatar';
   }
-  img.src = next;
   img.alt = name;
   img.hidden = false;
   fallback.hidden = true;
@@ -580,14 +864,14 @@ function renderAuth(status) {
   }
   if (status.authenticated) {
     const who = displayName(status);
-    const thumbnail = status.user?.thumbnail || status.userThumbnail || '';
+    const showAvatar = status.user?.hasImage !== false;
     els.authBadge.color = 'success';
     els.authBadge.textContent = 'Ingelogd';
     els.authUser.textContent = who;
-    applyAvatar(els.authAvatar, els.authAvatarFallback, thumbnail, who);
+    applyAvatar(els.authAvatar, els.authAvatarFallback, showAvatar, who);
     els.headerProfile.classList.remove('hidden');
     els.headerUserName.textContent = who;
-    applyAvatar(els.headerAvatar, els.headerAvatarFallback, thumbnail, who);
+    applyAvatar(els.headerAvatar, els.headerAvatarFallback, showAvatar, who);
     els.kpiConnectionBadge.color = 'success';
     els.kpiConnectionBadge.textContent = 'Verbonden';
     els.kpiConnectionCopy.textContent = who;
@@ -596,7 +880,7 @@ function renderAuth(status) {
     els.authBadge.color = undefined;
     els.authBadge.textContent = 'Niet ingelogd';
     els.authUser.textContent = '';
-    applyAvatar(els.authAvatar, els.authAvatarFallback, '', '');
+    applyAvatar(els.authAvatar, els.authAvatarFallback, false, '');
     els.authAvatarFallback.hidden = true;
     els.headerProfile.classList.add('hidden');
     els.headerUserName.textContent = '';
@@ -784,8 +1068,13 @@ async function loadBrowse(path) {
   renderBrowse(result);
 }
 
-async function openFolderBrowser() {
-  await loadBrowse(state.localPath || state.browsePath || '');
+async function openFolderBrowser(target = 'link') {
+  state.browseTarget = target;
+  const start = target === 'shared' ? state.sharedPath
+    : target === 'clone' ? state.cloneLocal
+    : target === 'watch' ? state.watchRoot
+    : state.localPath;
+  await loadBrowse(start || '');
   folderBrowserDialog()?.showModal();
 }
 
@@ -798,8 +1087,35 @@ async function selectBrowsedFolder() {
     showAlert('error', 'Kies een map.');
     return;
   }
-  state.localPath = state.browsePath;
+  const chosen = state.browsePath;
   closeFolderBrowser();
+  if (state.browseTarget === 'shared') {
+    const result = await api(`/api/setup/local-tree?path=${encodeURIComponent(chosen)}`);
+    state.sharedPath = result.path || chosen;
+    renderSharedPath();
+    els.sharedScanCopy.textContent = result.exists
+      ? `${result.folders?.length || 0} submappen in ${result.path}`
+      : (result.error || 'Map niet gevonden.');
+    if (!result.exists) {
+      showAlert('error', result.error || 'Map niet gevonden.');
+      return;
+    }
+    showAlert(null);
+    return;
+  }
+  if (state.browseTarget === 'clone') {
+    state.cloneLocal = chosen;
+    renderClonePath();
+    showAlert(null);
+    return;
+  }
+  if (state.browseTarget === 'watch') {
+    state.watchRoot = chosen;
+    renderWatchPath();
+    showAlert(null);
+    return;
+  }
+  state.localPath = chosen;
   renderLocalPath();
   const result = await scanLocal();
   if (!result.exists) {
@@ -839,9 +1155,7 @@ async function loadProjects() {
   if (els.wizardTemplate) {
     els.wizardTemplate.options = options;
   }
-  if (els.sharedProject) {
-    els.sharedProject.options = options;
-  }
+  renderSharedProjectChecks();
   els.projectSelect.value = state.projectId || '';
   renderStepper();
   renderDashboard();
@@ -896,7 +1210,12 @@ function formatWhen(value) {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString('nl-NL');
+  return formatLocalTimestamp(date);
+}
+
+function formatLocalTimestamp(date) {
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()}, ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function filteredOverviewJobs() {
@@ -1229,7 +1548,21 @@ bindButton(els.showNewProjectBtn, () => {
   setLinkMode(state.linkMode === 'new' ? 'existing' : 'new');
 });
 
-bindButton(els.browseBtn, () => openFolderBrowser().catch((error) => showAlert('error', error.message)));
+bindButton(els.browseBtn, () => openFolderBrowser('link').catch((error) => showAlert('error', error.message)));
+bindButton(els.cloneBrowseBtn, () => openFolderBrowser('clone').catch((error) => showAlert('error', error.message)));
+bindButton(els.watchBrowseBtn, () => openFolderBrowser('watch').catch((error) => showAlert('error', error.message)));
+bindButton(els.watchClearBtn, () => {
+  state.watchRoot = '';
+  renderWatchPath();
+});
+bindButton(els.provisionBack, () => setProvisionStep(state.provisionStep - 1));
+bindButton(els.provisionNext, () => {
+  if (!provisionStepReady(state.provisionStep)) {
+    return;
+  }
+  showAlert(null);
+  setProvisionStep(state.provisionStep + 1);
+});
 bindButton(els.browseUp, () => {
   loadBrowse(state.browseParent || '').catch((error) => showAlert('error', error.message));
 });
@@ -1442,22 +1775,23 @@ bindButton(els.detailSave, async () => {
   }
 });
 
-els.sharedDirection.options = DIRECTION_OPTIONS;
-els.sharedDirection.value = 'LocalToCloud';
 els.prefDirection.options = DEFAULT_DIRECTION_OPTIONS;
 els.prefDirection.value = state.defaultDirection;
 renderLocalPath();
 setLinkMode('existing');
 setWizardStep(0);
+setSharedStep(0);
+setProvisionStep(0);
 renderMappingRows();
 
 els.tabs.tabs = [
   { label: 'Overzicht', icon: 'home', iconPosition: 'left' },
   { label: 'Mappen & projecten', icon: 'folder_closed', iconPosition: 'left' },
   { label: 'Project koppelen', icon: 'folder_open', iconPosition: 'left' },
-  { label: 'Centrale mappen', icon: 'link', iconPosition: 'left', disabled: true },
+  { label: 'Centrale mappen', icon: 'link', iconPosition: 'left' },
   { label: 'Nieuw project', icon: 'add', iconPosition: 'left' },
   { label: 'Instellingen', icon: 'settings', iconPosition: 'left' },
+  { label: 'Systeem & backup', icon: 'download', iconPosition: 'left' },
 ];
 els.tabs.activeTabIndex = 0;
 els.tabs.addEventListener('tabChange', (event) => {
@@ -1468,37 +1802,36 @@ els.sharedName.addEventListener('inputChange', (event) => {
   state.sharedName = readInputString(event);
   els.sharedName.value = state.sharedName;
 });
-els.sharedPath.addEventListener('inputChange', (event) => {
-  state.sharedPath = readInputString(event);
-  els.sharedPath.value = state.sharedPath;
+els.sharedFolderName.value = '99_Algemeen';
+els.sharedAutocreate.value = true;
+els.sharedFolderName.addEventListener('inputChange', (event) => {
+  state.sharedFolderName = readInputString(event).trim() || '99_Algemeen';
+  els.sharedFolderName.value = state.sharedFolderName;
 });
-els.sharedFolder.addEventListener('inputChange', (event) => {
-  els.sharedFolder.value = readInputString(event);
+els.sharedAutocreate.addEventListener('inputChange', (event) => {
+  state.sharedAutoCreate = readInputChecked(event);
+  els.sharedAutocreate.value = state.sharedAutoCreate;
 });
-bindButton(els.sharedAddBtn, () => {
-  const project = projectById(els.sharedProject.value) || projectById(state.projectId);
-  const remoteFolderPath = els.sharedFolder.value || '/';
-  if (!project || !remoteFolderPath) {
-    showAlert('error', 'Kies een doelproject en een remote map-pad.');
+bindButton(els.sharedNewBtn, () => {
+  resetSharedForm();
+});
+bindButton(els.sharedBrowseBtn, () => openFolderBrowser('shared').catch((error) => showAlert('error', error.message)));
+bindButton(els.sharedBack, () => setSharedStep(state.sharedStep - 1));
+bindButton(els.sharedNext, () => {
+  if (!sharedStepReady(state.sharedStep)) {
     return;
   }
-  state.sharedTargets.push({
-    projectName: project.name,
-    projectId: project.id,
-    remoteFolderPath,
-  });
-  renderSharedTable();
-});
-bindButton(els.sharedRemoveBtn, () => {
-  if (state.selectedTarget >= 0) {
-    state.sharedTargets.splice(state.selectedTarget, 1);
-    state.selectedTarget = -1;
-    renderSharedTable();
-  }
+  showAlert(null);
+  setSharedStep(state.sharedStep + 1);
 });
 els.sharedTable.addEventListener('rowClick', (event) => {
   const row = event.detail?.row || {};
-  state.selectedTarget = Number(row.id ?? event.detail?.id);
+  const id = row.id ?? event.detail?.id;
+  const rules = state.config?.sharedSyncRules || [];
+  const rule = rules.find((item) => item.ruleId === id) || rules[Number(id)];
+  if (rule) {
+    loadSharedForm(rule);
+  }
 });
 els.projectsTable.addEventListener('rowClick', async (event) => {
   const row = event.detail?.row || {};
@@ -1520,30 +1853,60 @@ els.projectsTable.addEventListener('rowClick', async (event) => {
   setWizardStep(0);
   await scanLocal().catch(() => undefined);
 });
+bindButton(els.sharedDeleteBtn, async () => {
+  try {
+    if (!state.sharedRuleId) {
+      showAlert('error', 'Kies eerst een centrale map in de tabel.');
+      return;
+    }
+    const config = state.config || await api('/api/setup/config');
+    const rules = (config.sharedSyncRules || []).filter((rule) => rule.ruleId !== state.sharedRuleId);
+    await saveConfig({ ...config, sharedSyncRules: rules });
+    resetSharedForm();
+    showAlert('success', 'Centrale map verwijderd.');
+  } catch (error) {
+    showAlert('error', error.message);
+  }
+});
 bindButton(els.sharedSaveBtn, async () => {
   try {
+    const folderName = (state.sharedFolderName || els.sharedFolderName.value || '99_Algemeen').replace(/^\/+|\/+$/g, '') || '99_Algemeen';
     if (!state.sharedName || !state.sharedPath) {
-      showAlert('error', 'Naam en lokale map zijn verplicht.');
+      showAlert('error', 'Naam en lokale bronmap zijn verplicht.');
+      return;
+    }
+    if (!state.sharedProjectIds.length) {
+      showAlert('error', 'Kies minstens één Trimble Connect-project.');
       return;
     }
     const config = state.config || await api('/api/setup/config');
     const rules = [...(config.sharedSyncRules || [])];
+    const ruleId = state.sharedRuleId || (globalThis.crypto?.randomUUID?.() || `shared-${Date.now()}`);
     const nextRule = {
+      ruleId,
       name: state.sharedName,
       localFolderPath: state.sharedPath,
-      direction: els.sharedDirection.value || 'LocalToCloud',
+      targetFolderName: folderName,
+      targetProjectIds: [...state.sharedProjectIds],
+      direction: 'LocalToCloud',
       syncIntervalSeconds: 300,
-      syncTargets: state.sharedTargets,
+      autoCreateRemoteFolder: state.sharedAutoCreate !== false,
+      syncTargets: state.sharedProjectIds.map((projectId) => ({
+        projectId,
+        projectName: projectById(projectId)?.name || '',
+        remoteFolderPath: `/${folderName}`,
+        remoteFolderId: '',
+      })),
     };
-    const index = rules.findIndex((rule) => rule.name === state.sharedName);
+    const index = rules.findIndex((rule) => rule.ruleId === ruleId || rule.name === state.sharedName);
     if (index >= 0) {
       rules[index] = nextRule;
     } else {
       rules.push(nextRule);
     }
     await saveConfig({ ...config, sharedSyncRules: rules });
-    showAlert('success', 'Centrale map opgeslagen. Paden worden per project aangemaakt indien nodig.');
-    setTab(0);
+    resetSharedForm();
+    showAlert('success', 'Centrale map gekoppeld. Ontbrekende doelmapen worden per project aangemaakt.');
   } catch (error) {
     showAlert('error', error.message);
   }
@@ -1558,6 +1921,54 @@ els.prefRemoteParent.addEventListener('inputChange', (event) => {
   state.defaultRemoteParent = value.startsWith('/') ? value : `/${value}`;
   els.prefRemoteParent.value = state.defaultRemoteParent === '/' ? '' : state.defaultRemoteParent;
 });
+function portNoticeText(port) {
+  const safe = Number.isInteger(port) && port > 0 && port <= 65535 ? port : 5000;
+  return `Let op: Na het wijzigen van de poort dient de applicatie opnieuw te worden opgestart en moet het nieuwe callback-adres (bijv. http://localhost:${safe}/callback) geregistreerd staan in de Trimble Developer Console.`;
+}
+
+function setListenPortField(port) {
+  const number = Number(port);
+  const safe = Number.isInteger(number) && number > 0 && number <= 65535 ? number : 5000;
+  state.listenPort = String(safe);
+  if (els.listenPort) {
+    els.listenPort.value = state.listenPort;
+  }
+  if (els.portNotice) {
+    els.portNotice.variant = 'warning';
+    els.portNotice.alertDescription = portNoticeText(safe);
+  }
+}
+
+if (els.listenPort) {
+  els.listenPort.addEventListener('inputChange', (event) => {
+    const value = readInputString(event).trim();
+    state.listenPort = value;
+    els.listenPort.value = value;
+    const number = Number(value);
+    if (els.portNotice) {
+      els.portNotice.alertDescription = portNoticeText(number);
+    }
+  });
+}
+
+bindButton(els.portSave, async () => {
+  const port = Number(state.listenPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    showAlert('error', 'Kies een poort tussen 1 en 65535.');
+    return;
+  }
+  try {
+    const result = await api('/api/system/port', {
+      method: 'PUT',
+      body: JSON.stringify({ port }),
+    });
+    setListenPortField(result.port || port);
+    showAlert('success', result.message || 'Poort opgeslagen. Herstart de connector om de nieuwe poort te gebruiken.');
+  } catch (error) {
+    showAlert('error', error.message);
+  }
+});
+
 bindButton(els.prefSave, async () => {
   try {
     const config = state.config || await api('/api/setup/config');
@@ -1586,14 +1997,6 @@ els.cloneName.addEventListener('inputChange', (event) => {
 els.cloneDescription.addEventListener('inputChange', (event) => {
   state.cloneDescription = readInputString(event);
   els.cloneDescription.value = state.cloneDescription;
-});
-els.cloneLocal.addEventListener('inputChange', (event) => {
-  state.cloneLocal = readInputString(event);
-  els.cloneLocal.value = state.cloneLocal;
-});
-els.watchRoot.addEventListener('inputChange', (event) => {
-  state.watchRoot = readInputString(event);
-  els.watchRoot.value = state.watchRoot;
 });
 els.autoProvision.addEventListener('inputChange', (event) => {
   state.autoProvision = readInputChecked(event);
@@ -1651,8 +2054,119 @@ if (params.get('authError')) {
   showAlert('error', `Inloggen mislukt: ${params.get('authError')}`);
 }
 
+function restoreDialog() {
+  return document.getElementById('restore-confirm-dialog');
+}
+
+function selectedZip(event) {
+  const detail = event?.detail;
+  if (!detail) {
+    return null;
+  }
+  if (typeof detail.length === 'number') {
+    return detail.length ? detail[0] : null;
+  }
+  if (detail.files && detail.files.length) {
+    return detail.files[0];
+  }
+  return null;
+}
+
+async function loadLanAccess() {
+  const info = await api('/api/system/network');
+  const urls = Array.isArray(info.urls) && info.urls.length ? info.urls : [info.localUrl || 'http://localhost:5000'];
+  const primary = urls[0];
+  if (els.lanLink) {
+    els.lanLink.href = primary;
+    els.lanLink.textContent = primary;
+  }
+  setListenPortField(info.port);
+  if (els.lanBanner) {
+    els.lanBanner.hidden = false;
+    els.lanBanner.variant = info.listeningOnAllInterfaces === false ? 'warning' : 'info';
+    const extra = urls.length > 1 ? ` Andere adressen: ${urls.slice(1).join(', ')}.` : '';
+    els.lanBanner.alertDescription = info.listeningOnAllInterfaces === false
+      ? `Dit dashboard luistert alleen op deze pc (${info.localUrl}). LAN-binding is niet actief.${extra}`
+      : `Deel deze link met collega’s op hetzelfde netwerk.${extra}`;
+  }
+}
+
+async function downloadBackup() {
+  const response = await fetch('/api/system/backup');
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  const header = response.headers.get('Content-Disposition') || '';
+  const match = /filename="?([^";]+)"?/i.exec(header);
+  const fileName = match ? match[1] : 'TrimbleConnector-Backup.zip';
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showAlert('success', `Backup gedownload: ${fileName}`);
+}
+
+async function restoreBackup() {
+  if (!state.restoreFile) {
+    showAlert('error', 'Kies eerst een .zip-backup.');
+    return;
+  }
+  const body = new FormData();
+  body.append('file', state.restoreFile, state.restoreFile.name);
+  const response = await fetch('/api/system/restore', { method: 'POST', body });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+  if (els.restoreAlert) {
+    els.restoreAlert.hidden = false;
+    els.restoreAlert.variant = 'success';
+    els.restoreAlert.alertDescription = payload.message || 'Backup succesvol hersteld!';
+  }
+  showAlert('success', payload.message || 'Backup succesvol hersteld!');
+  if (els.restoreDropzone && typeof els.restoreDropzone.reset === 'function') {
+    await els.restoreDropzone.reset();
+  }
+  state.restoreFile = null;
+  await loadConfig();
+  await loadOverview();
+  await refreshStatus();
+}
+
+if (els.restoreDropzone) {
+  els.restoreDropzone.addEventListener('fileSelect', (event) => {
+    state.restoreFile = selectedZip(event);
+  });
+}
+bindButton(els.backupDownloadBtn, downloadBackup);
+bindButton(els.restoreBtn, () => {
+  if (!state.restoreFile) {
+    showAlert('error', 'Kies eerst een .zip-backup.');
+    return;
+  }
+  restoreDialog()?.showModal();
+});
+bindButton(els.restoreCancelBtn, () => {
+  restoreDialog()?.close();
+});
+bindButton(els.restoreConfirmBtn, async () => {
+  restoreDialog()?.close();
+  await restoreBackup();
+});
+
 try {
   await loadConfig();
+  try {
+    await loadLanAccess();
+  } catch (error) {
+    showAlert('error', error.message);
+  }
   const status = await refreshStatus();
   if (status.authenticated) {
     await loadProjects();

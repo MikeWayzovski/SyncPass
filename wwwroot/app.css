@@ -74,10 +74,16 @@ body {
   gap: 0.5rem;
 }
 
-.folder-list {
+.folder-list,
+.app-checklist-rows {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+
+.app-checklist-rows {
+  max-height: 16rem;
+  overflow: auto;
 }
 
 .folder-row {
@@ -260,4 +266,13 @@ body {
 .path-cell modus-wc-typography {
   min-width: 0;
   word-break: break-all;
+}
+
+.lan-link {
+  color: var(--modus-wc-color-primary);
+  font-weight: 600;
+}
+
+#restore-dropzone {
+  width: 100%;
 }

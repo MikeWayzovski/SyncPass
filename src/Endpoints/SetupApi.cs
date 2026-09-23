@@ -60,7 +60,7 @@ public sealed class SetupApi
             UserFirstName = user?.FirstName,
             UserLastName = user?.LastName,
             UserEmail = user?.Email,
-            UserThumbnail = user?.EffectiveThumbnail,
+            UserThumbnail = null,
             User = user is null
                 ? null
                 : new SetupUserDto
@@ -68,7 +68,8 @@ public sealed class SetupApi
                     FirstName = user.FirstName,
                     LastName = user.LastName,
                     Email = user.Email,
-                    Thumbnail = user.EffectiveThumbnail
+                    HasImage = user.HasImage,
+                    Thumbnail = null
                 },
             Jobs = _engine.CurrentJobs.Count > 0
                 ? _engine.CurrentJobs

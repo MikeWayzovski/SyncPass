@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using TrimbleConnector.Models;
 
@@ -12,6 +13,7 @@ public sealed class SyncStateRepository : IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly ILogger<SyncStateRepository> _logger;
+    private readonly string _path;
     private readonly object _gate = new();
     private bool _disposed;
 
@@ -20,22 +22,63 @@ public sealed class SyncStateRepository : IDisposable
         _logger = logger;
         var directory = Path.Combine(environment.ContentRootPath, "data");
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "syncstate.db");
+        _path = Path.Combine(directory, "syncstate.db");
         _connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            DataSource = path,
+            DataSource = _path,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Shared
         }.ToString());
         _connection.Open();
-        using (var pragma = _connection.CreateCommand())
-        {
-            pragma.CommandText = "PRAGMA journal_mode=WAL;";
-            pragma.ExecuteNonQuery();
-        }
-
+        ApplyPragmas();
         EnsureSchema();
-        _logger.LogInformation("Sync state database ready at {Path}.", path);
+        _logger.LogInformation("Sync state database ready at {Path}.", _path);
+    }
+
+    public void Checkpoint()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _connection.State != System.Data.ConnectionState.Open)
+            {
+                return;
+            }
+
+            using var command = _connection.CreateCommand();
+            command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public void Suspend()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _connection.State == System.Data.ConnectionState.Closed)
+            {
+                return;
+            }
+
+            _connection.Close();
+        }
+    }
+
+    public void Resume()
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (_connection.State != System.Data.ConnectionState.Open)
+            {
+                _connection.Open();
+                ApplyPragmas();
+                EnsureSchema();
+            }
+        }
     }
 
     public FileState? Get(string projectId, string relativePath)
@@ -239,6 +282,13 @@ public sealed class SyncStateRepository : IDisposable
         _connection.Dispose();
     }
 
+    private void ApplyPragmas()
+    {
+        using var pragma = _connection.CreateCommand();
+        pragma.CommandText = "PRAGMA journal_mode=WAL;";
+        pragma.ExecuteNonQuery();
+    }
+
     private void EnsureSchema()
     {
         using var command = _connection.CreateCommand();
@@ -289,8 +339,20 @@ public sealed class SyncStateRepository : IDisposable
             ? DateTime.SpecifyKind(value, DateTimeKind.Utc)
             : value.ToUniversalTime()).ToString("o");
 
-    private static DateTime ParseTime(string? value) =>
-        DateTime.TryParse(value, out var parsed)
-            ? DateTime.SpecifyKind(parsed, DateTimeKind.Utc)
-            : DateTime.MinValue;
+    private static DateTime ParseTime(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return DateTime.MinValue;
+        }
+
+        // Round-trip keeps the UTC instant. Plain TryParse converts a Z timestamp
+        // to local wall time, and labeling that result as UTC shifts the clock by the offset.
+        if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+        {
+            return parsed.UtcDateTime;
+        }
+
+        return DateTime.MinValue;
+    }
 }

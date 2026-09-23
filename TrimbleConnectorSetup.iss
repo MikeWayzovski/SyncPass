@@ -2,7 +2,7 @@
 ; Requires Inno Setup 6: https://jrsoftware.org/isdl.php
 
 #define AppName "Trimble Connector"
-#define AppVersion "2.3.2"
+#define AppVersion "2.5.5"
 #define AppPublisher "MikeWayzovski"
 #define ServiceName "TrimbleConnector"
 #define DashboardUrl "http://localhost:5000"

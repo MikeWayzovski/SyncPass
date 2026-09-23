@@ -41,7 +41,12 @@ function formatTimestamp(value) {
     return '—';
   }
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? String(value) : formatLocalTimestamp(date);
+}
+
+function formatLocalTimestamp(date) {
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()}, ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function showAlert(message) {

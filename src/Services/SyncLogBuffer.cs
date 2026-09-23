@@ -9,7 +9,8 @@ public sealed class SyncLogBuffer
 
     public void Add(string message)
     {
-        var line = $"{DateTimeOffset.Now:HH:mm:ss} {message}";
+        var timeStamp = DateTimeOffset.Now.ToString("dd-MM-yyyy, HH:mm:ss");
+        var line = $"{timeStamp} {message}";
         _entries.Enqueue(line);
         while (_entries.Count > Capacity && _entries.TryDequeue(out _))
         {

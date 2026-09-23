@@ -27,6 +27,10 @@ public sealed class SyncJobOptions
 
     public bool Enabled { get; set; } = true;
 
+    public string TargetFolderName { get; set; } = string.Empty;
+
+    public bool AutoCreateRemoteFolder { get; set; } = true;
+
     public FolderMetadata Metadata { get; set; } = new();
 
     [JsonIgnore]

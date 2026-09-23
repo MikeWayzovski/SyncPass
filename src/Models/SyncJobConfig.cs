@@ -37,15 +37,23 @@ public sealed class ProjectProvisioningOptions
 
 public sealed class SharedSyncRule
 {
+    public string RuleId { get; set; } = string.Empty;
+
     public string Name { get; set; } = string.Empty;
 
     public string LocalFolderPath { get; set; } = string.Empty;
+
+    public string TargetFolderName { get; set; } = "99_Algemeen";
+
+    public List<string> TargetProjectIds { get; set; } = [];
 
     public List<SyncTarget> SyncTargets { get; set; } = [];
 
     public SyncDirection Direction { get; set; } = SyncDirection.LocalToCloud;
 
     public int SyncIntervalSeconds { get; set; } = 300;
+
+    public bool AutoCreateRemoteFolder { get; set; } = true;
 }
 
 public sealed class SyncTarget

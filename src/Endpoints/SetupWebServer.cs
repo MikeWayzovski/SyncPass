@@ -13,33 +13,35 @@ namespace TrimbleConnector.Endpoints;
 public sealed class SetupWebServer : BackgroundService
 {
     private readonly SetupApi _api;
+    private readonly SystemEndpoints _system;
+    private readonly DashboardListenState _listen;
     private readonly IHostEnvironment _environment;
     private readonly ILogger<SetupWebServer> _logger;
 
-    public SetupWebServer(SetupApi api, IHostEnvironment environment, ILogger<SetupWebServer> logger)
+    public SetupWebServer(
+        SetupApi api,
+        SystemEndpoints system,
+        DashboardListenState listen,
+        IHostEnvironment environment,
+        ILogger<SetupWebServer> logger)
     {
         _api = api;
+        _system = system;
+        _listen = listen;
         _environment = environment;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var listener = new HttpListener();
-        listener.Prefixes.Add("http://localhost:5000/");
-        listener.Prefixes.Add("http://127.0.0.1:5000/");
-
-        try
+        var listener = BindListener();
+        if (listener is null)
         {
-            listener.Start();
-        }
-        catch (HttpListenerException ex)
-        {
-            _logger.LogError(ex, "Could not bind http://localhost:5000. The account dashboard is unavailable.");
             return;
         }
 
-        _logger.LogInformation("Trimble Connector account dashboard: http://localhost:5000");
+        using (listener)
+        {
 
         try
         {
@@ -59,6 +61,65 @@ public sealed class SetupWebServer : BackgroundService
                 listener.Stop();
             }
         }
+        }
+    }
+
+    private HttpListener? BindListener()
+    {
+        var prefixes = DashboardListen.ToPrefixes(_listen.RequestedUrl);
+        foreach (var prefix in prefixes)
+        {
+            var listener = new HttpListener();
+            listener.Prefixes.Add(prefix);
+            try
+            {
+                listener.Start();
+                _listen.Port = DashboardListen.PortOf(_listen.RequestedUrl);
+                _listen.ListeningOnAllInterfaces = prefix.Contains("://+", StringComparison.Ordinal)
+                    || prefix.Contains("://*", StringComparison.Ordinal);
+                _logger.LogInformation(
+                    "Trimble Connector account dashboard listening on {Prefix} (requested {Url}).",
+                    prefix,
+                    _listen.RequestedUrl);
+                return listener;
+            }
+            catch (Exception ex) when (ex is HttpListenerException or System.Net.Sockets.SocketException)
+            {
+                _logger.LogWarning(ex, "Could not bind {Prefix}.", prefix);
+                listener.Close();
+            }
+        }
+
+        if (DashboardListen.IsAllInterfaces(_listen.RequestedUrl))
+        {
+            var port = _listen.Port > 0 ? _listen.Port : DashboardListen.PortOf(_listen.RequestedUrl);
+            var fallback = new HttpListener();
+            fallback.Prefixes.Add($"http://localhost:{port}/");
+            fallback.Prefixes.Add($"http://127.0.0.1:{port}/");
+            try
+            {
+                fallback.Start();
+                _listen.Port = port;
+                _listen.ListeningOnAllInterfaces = false;
+                _logger.LogWarning(
+                    "LAN binding {Url} failed. Dashboard is only available at http://localhost:{Port}. On Windows, reserve the URL with: netsh http add urlacl url=http://+:{Port}/ user=Everyone",
+                    _listen.RequestedUrl,
+                    port,
+                    port);
+                return fallback;
+            }
+            catch (HttpListenerException ex)
+            {
+                _logger.LogError(ex, "Could not bind http://localhost:{Port}. The account dashboard is unavailable.", port);
+                fallback.Close();
+            }
+        }
+        else
+        {
+            _logger.LogError("Could not bind {Url}. The account dashboard is unavailable.", _listen.RequestedUrl);
+        }
+
+        return null;
     }
 
     private async Task HandleAsync(HttpListenerContext context, CancellationToken cancellationToken)
@@ -78,21 +139,9 @@ public sealed class SetupWebServer : BackgroundService
                 return;
             }
 
-            if (request.HttpMethod == "GET" && path == "/api/setup/avatar")
+            if (request.HttpMethod == "GET" && (path == "/api/user/avatar" || path == "/api/setup/avatar"))
             {
-                var avatar = await _api.GetAvatarAsync(cancellationToken).ConfigureAwait(false);
-                if (avatar is null)
-                {
-                    context.Response.StatusCode = (int)HttpStatusCode.NotFound;
-                    context.Response.Close();
-                    return;
-                }
-
-                context.Response.StatusCode = (int)HttpStatusCode.OK;
-                context.Response.ContentType = avatar.Value.ContentType;
-                context.Response.ContentLength64 = avatar.Value.Data.Length;
-                await context.Response.OutputStream.WriteAsync(avatar.Value.Data, cancellationToken).ConfigureAwait(false);
-                context.Response.Close();
+                await WriteAvatarAsync(context.Response, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -278,6 +327,50 @@ public sealed class SetupWebServer : BackgroundService
                 return;
             }
 
+            if (request.HttpMethod == "GET" && path == "/api/system/network")
+            {
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, _system.DescribeNetwork(), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "PUT" && path == "/api/system/port")
+            {
+                using var portReader = new StreamReader(request.InputStream, request.ContentEncoding);
+                var portBody = await portReader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                var update = JsonSerializer.Deserialize<ListenPortUpdateRequest>(portBody, JsonDefaults.Serializer)
+                    ?? throw new ArgumentException("Ongeldige poort.");
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    _system.SaveListenPort(update.Port),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "GET" && path == "/api/system/backup")
+            {
+                var backup = _system.CreateBackup();
+                await WriteBytesAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    "application/zip",
+                    $"attachment; filename=\"{backup.FileName}\"",
+                    backup.Content,
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "POST" && path == "/api/system/restore")
+            {
+                var upload = await SystemEndpoints.ReadUploadAsync(
+                    request.InputStream,
+                    request.ContentType,
+                    request.ContentLength64 > 0 ? request.ContentLength64 : null,
+                    cancellationToken).ConfigureAwait(false);
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, _system.Restore(upload), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             if (request.HttpMethod == "GET" && path == "/api/activity")
             {
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, _api.GetRecentActivities(), cancellationToken).ConfigureAwait(false);
@@ -389,6 +482,65 @@ public sealed class SetupWebServer : BackgroundService
         ".png" => "image/png",
         _ => "application/octet-stream"
     };
+
+    private static async Task WriteBytesAsync(
+        HttpListenerResponse response,
+        HttpStatusCode status,
+        string contentType,
+        string contentDisposition,
+        byte[] bytes,
+        CancellationToken cancellationToken)
+    {
+        response.StatusCode = (int)status;
+        response.ContentType = contentType;
+        response.Headers["Content-Disposition"] = contentDisposition;
+        response.ContentLength64 = bytes.Length;
+        await response.OutputStream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+        response.Close();
+    }
+
+    private async Task WriteAvatarAsync(HttpListenerResponse response, CancellationToken cancellationToken)
+    {
+        byte[] data;
+        string contentType;
+        try
+        {
+            var avatar = await _api.GetAvatarAsync(cancellationToken).ConfigureAwait(false);
+            if (avatar is null || avatar.Value.Data.Length == 0)
+            {
+                data = AvatarFallbackSvg;
+                contentType = "image/svg+xml";
+            }
+            else
+            {
+                data = avatar.Value.Data;
+                contentType = string.IsNullOrWhiteSpace(avatar.Value.ContentType)
+                    ? "image/jpeg"
+                    : avatar.Value.ContentType;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "User avatar proxy failed. Serving the local fallback.");
+            data = AvatarFallbackSvg;
+            contentType = "image/svg+xml";
+        }
+
+        response.StatusCode = (int)HttpStatusCode.OK;
+        response.ContentType = contentType;
+        response.ContentLength64 = data.Length;
+        response.Headers["Cache-Control"] = "private, no-store";
+        await response.OutputStream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+        response.Close();
+    }
+
+    private static readonly byte[] AvatarFallbackSvg = """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Gebruiker">
+          <rect width="64" height="64" rx="32" fill="#d0d3d4"/>
+          <circle cx="32" cy="24" r="10" fill="#6a6e79"/>
+          <path d="M14 54c2.2-11 9.5-16 18-16s15.8 5 18 16" fill="#6a6e79"/>
+        </svg>
+        """u8.ToArray();
 
     private static async Task WriteJsonAsync(HttpListenerResponse response, HttpStatusCode status, object payload, CancellationToken cancellationToken)
     {

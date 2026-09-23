@@ -24,11 +24,18 @@ IHost host = builder
             options.ServiceName = ProductInfo.ServiceName;
         });
 
+        var listenUrl = DashboardListen.Resolve(context.Configuration);
+        var listenPort = DashboardListen.PortOf(listenUrl);
         services.Configure<TrimbleConnectOptions>(
             context.Configuration.GetSection(TrimbleConnectOptions.SectionName));
+        services.PostConfigure<TrimbleConnectOptions>(options =>
+        {
+            options.Port = listenPort;
+        });
 
         services.AddHttpClient("TrimbleIdentity", client =>
         {
+            client.BaseAddress = new Uri(TrimbleConnectOptions.DefaultIdentityUrl);
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         });
@@ -69,7 +76,13 @@ IHost host = builder
         services.AddSingleton<SyncInventoryService>();
         services.AddSingleton<SyncEngine>();
         services.AddSingleton<SetupApi>();
-        // SetupWebServer hosts http://localhost:5000 including GET /api/activity and /activity.
+        services.AddSingleton<SystemEndpoints>();
+        services.AddSingleton(new DashboardListenState
+        {
+            RequestedUrl = listenUrl,
+            Port = listenPort
+        });
+        // HttpListener binds the resolved port on all adapters (http://*:port) unless the Kestrel URL names a host.
         services.AddHostedService<SetupWebServer>();
         services.AddHostedService<Worker>();
     })

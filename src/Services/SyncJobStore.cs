@@ -56,6 +56,17 @@ public sealed class SyncJobStore
         UpsertProjectJob(job);
     }
 
+    public void ReloadFromDisk()
+    {
+        lock (_gate)
+        {
+            _config = LoadFromDisk();
+            Normalize(_config);
+        }
+
+        _logger.LogInformation("Reloaded connector config from disk.");
+    }
+
     public void SaveConfig(ConnectorSyncConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -274,34 +285,61 @@ public sealed class SyncJobStore
 
         foreach (var rule in config.SharedSyncRules)
         {
+            NormalizeRule(rule);
             if (string.IsNullOrWhiteSpace(rule.LocalFolderPath))
             {
                 continue;
             }
 
-            foreach (var target in rule.SyncTargets)
+            var projectIds = rule.TargetProjectIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (projectIds.Count == 0)
             {
-                if (string.IsNullOrWhiteSpace(target.ProjectId) && string.IsNullOrWhiteSpace(target.ProjectName))
+                projectIds = rule.SyncTargets
+                    .Select(target => target.ProjectId)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            foreach (var projectId in projectIds)
+            {
+                var target = rule.SyncTargets.FirstOrDefault(item =>
+                    string.Equals(item.ProjectId, projectId, StringComparison.OrdinalIgnoreCase));
+                var folderName = rule.TargetFolderName?.Trim().Trim('/') ?? string.Empty;
+                var remotePath = target?.RemoteFolderPath ?? string.Empty;
+                var useName = !string.IsNullOrWhiteSpace(folderName)
+                    && (string.IsNullOrWhiteSpace(remotePath)
+                        || string.Equals(
+                            RemotePath.Normalize(remotePath).Trim('/'),
+                            folderName,
+                            StringComparison.OrdinalIgnoreCase));
+                if (!useName
+                    && string.IsNullOrWhiteSpace(remotePath)
+                    && string.IsNullOrWhiteSpace(target?.RemoteFolderId))
                 {
                     continue;
                 }
 
-                if (string.IsNullOrWhiteSpace(target.RemoteFolderId) && string.IsNullOrWhiteSpace(target.RemoteFolderPath))
-                {
-                    continue;
-                }
-
+                var path = useName ? "/" + folderName : RemotePath.Copy(remotePath);
                 jobs.Add(new SyncJobOptions
                 {
-                    JobId = MakeId("shared", rule.Name, target.ProjectId, target.ProjectName, target.RemoteFolderPath, target.RemoteFolderId),
-                    ProjectName = target.ProjectName,
-                    ProjectId = target.ProjectId.Trim(),
+                    JobId = MakeId("shared", rule.RuleId, rule.Name, projectId, path),
+                    ProjectName = target?.ProjectName ?? string.Empty,
+                    ProjectId = projectId,
                     LocalProjectRoot = rule.LocalFolderPath.Trim(),
                     LocalFolderPath = rule.LocalFolderPath.Trim(),
-                    RemoteFolderPath = RemotePath.Copy(target.RemoteFolderPath),
-                    RemoteFolderId = target.RemoteFolderId?.Trim() ?? string.Empty,
+                    RemoteFolderPath = path,
+                    RemoteFolderId = useName ? string.Empty : target?.RemoteFolderId?.Trim() ?? string.Empty,
+                    TargetFolderName = useName ? folderName : string.Empty,
+                    AutoCreateRemoteFolder = rule.AutoCreateRemoteFolder,
                     SyncIntervalSeconds = rule.SyncIntervalSeconds < 15 ? 15 : rule.SyncIntervalSeconds,
-                    Direction = rule.Direction
+                    Direction = rule.Direction,
+                    Enabled = true
                 });
             }
         }
@@ -332,6 +370,55 @@ public sealed class SyncJobStore
         foreach (var job in config.SyncJobs)
         {
             NormalizeJob(job);
+        }
+
+        foreach (var rule in config.SharedSyncRules)
+        {
+            NormalizeRule(rule);
+        }
+    }
+
+    private static void NormalizeRule(SharedSyncRule rule)
+    {
+        rule.SyncTargets ??= [];
+        rule.TargetProjectIds ??= [];
+        rule.TargetProjectIds = rule.TargetProjectIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (rule.TargetProjectIds.Count == 0)
+        {
+            rule.TargetProjectIds = rule.SyncTargets
+                .Select(target => target.ProjectId)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        if (string.IsNullOrWhiteSpace(rule.TargetFolderName))
+        {
+            var hasCustomPath = rule.SyncTargets.Any(target => !string.IsNullOrWhiteSpace(target.RemoteFolderPath));
+            if (!hasCustomPath)
+            {
+                rule.TargetFolderName = "99_Algemeen";
+            }
+        }
+        else
+        {
+            rule.TargetFolderName = rule.TargetFolderName.Trim().Trim('/');
+        }
+
+        if (rule.SyncIntervalSeconds < 15)
+        {
+            rule.SyncIntervalSeconds = 300;
+        }
+
+        if (string.IsNullOrWhiteSpace(rule.RuleId)
+            && (!string.IsNullOrWhiteSpace(rule.Name) || !string.IsNullOrWhiteSpace(rule.LocalFolderPath)))
+        {
+            rule.RuleId = MakeId("rule", rule.Name, rule.LocalFolderPath);
         }
     }
 
@@ -408,11 +495,15 @@ public sealed class SyncJobStore
 
     private static SharedSyncRule CloneRule(SharedSyncRule rule) => new()
     {
+        RuleId = rule.RuleId,
         Name = rule.Name,
         LocalFolderPath = rule.LocalFolderPath,
+        TargetFolderName = rule.TargetFolderName,
+        TargetProjectIds = rule.TargetProjectIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [],
         Direction = rule.Direction,
         SyncIntervalSeconds = rule.SyncIntervalSeconds,
-        SyncTargets = rule.SyncTargets.Select(target => new SyncTarget
+        AutoCreateRemoteFolder = rule.AutoCreateRemoteFolder,
+        SyncTargets = (rule.SyncTargets ?? []).Select(target => new SyncTarget
         {
             ProjectName = target.ProjectName,
             ProjectId = target.ProjectId,
@@ -430,6 +521,8 @@ public sealed class SyncJobStore
         LocalFolderPath = job.LocalFolderPath,
         RemoteFolderPath = job.RemoteFolderPath,
         RemoteFolderId = job.RemoteFolderId,
+        TargetFolderName = job.TargetFolderName,
+        AutoCreateRemoteFolder = job.AutoCreateRemoteFolder,
         SyncIntervalSeconds = job.SyncIntervalSeconds,
         Direction = job.Direction,
         Enabled = job.Enabled,

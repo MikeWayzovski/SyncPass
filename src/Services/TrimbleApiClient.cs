@@ -57,6 +57,13 @@ public interface ITrimbleApiClient
         string name,
         CancellationToken cancellationToken);
 
+    Task<string?> GetOrCreateFolderByNameAsync(
+        string projectId,
+        string parentFolderId,
+        string folderName,
+        bool autoCreate,
+        CancellationToken cancellationToken);
+
     Task<string?> TryResolveFolderAsync(
         string projectId,
         string remoteFolderPath,
@@ -582,6 +589,87 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
         return created;
     }
 
+    public async Task<string?> GetOrCreateFolderByNameAsync(
+        string projectId,
+        string parentFolderId,
+        string folderName,
+        bool autoCreate,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(folderName))
+        {
+            throw new ArgumentException("folderName is required.", nameof(folderName));
+        }
+
+        if (string.IsNullOrWhiteSpace(parentFolderId)
+            || string.Equals(parentFolderId, projectId, StringComparison.OrdinalIgnoreCase))
+        {
+            parentFolderId = await ResolveRootFolderIdAsync(projectId, startFolderId: null, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var children = await ListSubfoldersAsync(parentFolderId, cancellationToken).ConfigureAwait(false);
+        var existing = children.FirstOrDefault(folder =>
+            string.Equals(folder.Name, folderName, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(existing?.Id))
+        {
+            return existing.Id;
+        }
+
+        if (!autoCreate)
+        {
+            return null;
+        }
+
+        var createdId = await TryCreateFolderV21Async(projectId, parentFolderId, folderName, cancellationToken)
+            .ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(createdId))
+        {
+            _logger.LogInformation(
+                "Created remote folder {Folder} in project {ProjectId}.",
+                folderName,
+                projectId);
+            return createdId;
+        }
+
+        var fallback = await CreateFolderAsync(projectId, parentFolderId, folderName, cancellationToken)
+            .ConfigureAwait(false);
+        return fallback.Id;
+    }
+
+    private async Task<string?> TryCreateFolderV21Async(
+        string projectId,
+        string parentFolderId,
+        string folderName,
+        CancellationToken cancellationToken)
+    {
+        var url = $"folders?projectId={Uri.EscapeDataString(projectId)}";
+        using var response = await SendAsync(
+                HttpMethod.Post,
+                url,
+                new { name = folderName, parentId = parentFolderId },
+                cancellationToken,
+                ApiVersion.V21)
+            .ConfigureAwait(false);
+        var payload = await ReadResponseBodyAsync(response, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogInformation(
+                "API v2.1 did not create folder {Folder} ({StatusCode}). Using API v2.0.",
+                folderName,
+                (int)response.StatusCode);
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        var created = JsonSerializer.Deserialize<ConnectFolder>(payload, ApiJsonOptions);
+        return string.IsNullOrWhiteSpace(created?.Id) ? null : created.Id;
+    }
+
     private async Task<string> ResolveRootFolderIdAsync(
         string projectId,
         string? startFolderId,
@@ -742,7 +830,12 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
     public async Task<(byte[] Data, string ContentType)?> DownloadUserThumbnailAsync(CancellationToken cancellationToken)
     {
         var user = await GetLoggedInUserAsync(cancellationToken).ConfigureAwait(false);
-        var url = user?.EffectiveThumbnail;
+        if (user is null || user.HasImage == false || string.IsNullOrWhiteSpace(user.EffectiveThumbnail))
+        {
+            return null;
+        }
+
+        var url = ResolveThumbnailUrl(user.EffectiveThumbnail);
         if (string.IsNullOrWhiteSpace(url))
         {
             return null;
@@ -753,24 +846,35 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
             return (cached.Data, cached.ContentType);
         }
 
-        var token = await _auth.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
-        var client = _httpClientFactory.CreateClient("Transfer");
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            var error = await ReadResponseBodyAsync(response, cancellationToken).ConfigureAwait(false);
-            _logger.LogError(
-                "{Error}",
-                FormatApiError(HttpMethod.Get, "users/me/thumbnail", response.StatusCode, error, requestBody: null));
+            var token = await _auth.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
+            var client = _httpClientFactory.CreateClient("Transfer");
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug(
+                    "User thumbnail request returned {StatusCode}. Using the local avatar fallback.",
+                    (int)response.StatusCode);
+                return null;
+            }
+
+            var data = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+            _cachedAvatar = (data, contentType, url);
+            return (data, contentType);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogDebug(ex, "User thumbnail request failed. Using the local avatar fallback.");
             return null;
         }
-
-        var data = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
-        _cachedAvatar = (data, contentType, url);
-        return (data, contentType);
     }
 
     public async Task<IReadOnlyList<ConnectProject>> GetProjectsAsync(CancellationToken cancellationToken)
@@ -992,6 +1096,47 @@ public sealed class TrimbleApiClient : ITrimbleApiClient
                 .ConfigureAwait(false);
             return folder.AllItems.ToList();
         }
+    }
+
+    private string? ResolveThumbnailUrl(string? template)
+    {
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            return null;
+        }
+
+        var useIdentity = template.Contains(TrimbleConnectOptions.IdentityHost, StringComparison.OrdinalIgnoreCase)
+            || template.Contains("{identity", StringComparison.OrdinalIgnoreCase);
+        var host = useIdentity
+            ? TrimbleConnectOptions.IdentityHost
+            : TrimbleConnectOptions.GlobalConnectHost;
+
+        var resolved = template
+            .Replace("{baseURL}", host, StringComparison.OrdinalIgnoreCase)
+            .Replace("{identityURL}", TrimbleConnectOptions.IdentityHost, StringComparison.OrdinalIgnoreCase);
+        if (!useIdentity)
+        {
+            resolved = resolved.Replace(
+                "app21.connect.trimble.com",
+                TrimbleConnectOptions.GlobalConnectHost,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        if (resolved.Contains("{baseURL}", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (resolved.StartsWith("//", StringComparison.Ordinal))
+        {
+            return "https:" + resolved;
+        }
+
+        if (!resolved.Contains("://", StringComparison.Ordinal))
+        {
+            return "https://" + resolved.TrimStart('/');
+        }
+
+        return resolved;
     }
 
     private static string? ReadThumbnail(JsonElement payload)

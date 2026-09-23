@@ -14,6 +14,8 @@ public interface ITrimbleAuthService
     Task<string> GetAccessTokenAsync(CancellationToken cancellationToken);
 
     void StoreRefreshToken(string refreshToken, string? accessToken = null, int expiresIn = 0);
+
+    void ReloadPersistedCredentials();
 }
 
 /// <summary>
@@ -65,6 +67,14 @@ public sealed class TrimbleAuthService : ITrimbleAuthService
             _accessToken = accessToken;
             _expiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresIn > 0 ? expiresIn : 3600);
         }
+    }
+
+    public void ReloadPersistedCredentials()
+    {
+        _accessToken = null;
+        _expiresAt = DateTimeOffset.MinValue;
+        _refreshToken = LoadPersistedRefreshToken() ?? _options.CurrentValue.RefreshToken;
+        _logger.LogInformation("Reloaded persisted Trimble credentials from disk.");
     }
 
     public async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken)
