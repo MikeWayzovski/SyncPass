@@ -327,6 +327,32 @@ public sealed class SetupWebServer : BackgroundService
                 return;
             }
 
+            if (request.HttpMethod == "GET" && path == "/api/system/auth")
+            {
+                await WriteJsonAsync(context.Response, HttpStatusCode.OK, _system.DescribeAuth(), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "POST" && path == "/api/system/auth/refresh")
+            {
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    await _system.ForceTokenRefreshAsync(cancellationToken).ConfigureAwait(false),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.HttpMethod == "POST" && path == "/api/system/diagnostics")
+            {
+                await WriteJsonAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    await _system.RunDiagnosticsAsync(cancellationToken).ConfigureAwait(false),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             if (request.HttpMethod == "GET" && path == "/api/system/network")
             {
                 await WriteJsonAsync(context.Response, HttpStatusCode.OK, _system.DescribeNetwork(), cancellationToken).ConfigureAwait(false);

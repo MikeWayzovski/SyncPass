@@ -26,6 +26,7 @@ public sealed class SystemEndpoints
     private readonly ITrimbleAuthService _auth;
     private readonly DashboardListenState _listen;
     private readonly IOptionsMonitor<TrimbleConnectOptions> _options;
+    private readonly SystemHealthService _health;
     private readonly ILogger<SystemEndpoints> _logger;
 
     public SystemEndpoints(
@@ -36,6 +37,7 @@ public sealed class SystemEndpoints
         ITrimbleAuthService auth,
         DashboardListenState listen,
         IOptionsMonitor<TrimbleConnectOptions> options,
+        SystemHealthService health,
         ILogger<SystemEndpoints> logger)
     {
         _environment = environment;
@@ -45,6 +47,7 @@ public sealed class SystemEndpoints
         _auth = auth;
         _listen = listen;
         _options = options;
+        _health = health;
         _logger = logger;
     }
 
@@ -64,6 +67,34 @@ public sealed class SystemEndpoints
             redirectUri = _options.CurrentValue.EffectiveRedirectUri
         };
     }
+
+    public TokenHealth DescribeAuth() => _auth.DescribeHealth();
+
+    public async Task<object> ForceTokenRefreshAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _auth.ForceTokenRefreshAsync(cancellationToken).ConfigureAwait(false);
+            return new
+            {
+                success = true,
+                health = _auth.DescribeHealth()
+            };
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException)
+        {
+            _logger.LogWarning("Manual token refresh failed: {Message}", ex.Message);
+            return new
+            {
+                success = false,
+                error = ex.Message,
+                health = _auth.DescribeHealth()
+            };
+        }
+    }
+
+    public Task<SystemDiagnostics> RunDiagnosticsAsync(CancellationToken cancellationToken) =>
+        _health.CheckAsync(cancellationToken);
 
     public object SaveListenPort(int port)
     {

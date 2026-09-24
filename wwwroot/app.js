@@ -147,6 +147,13 @@ const els = {
   listenPort: document.getElementById('listen-port'),
   portNotice: document.getElementById('port-notice'),
   portSave: document.getElementById('port-save-btn'),
+  authHealthBadge: document.getElementById('auth-health-badge'),
+  authExpiry: document.getElementById('auth-expiry'),
+  authRefreshUpdated: document.getElementById('auth-refresh-updated'),
+  authDiagAlert: document.getElementById('auth-diag-alert'),
+  authDiagBtn: document.getElementById('auth-diag-btn'),
+  authRefreshBtn: document.getElementById('auth-refresh-btn'),
+  authLoginBtn: document.getElementById('auth-login-btn'),
   lanBanner: document.getElementById('lan-banner'),
   lanLink: document.getElementById('lan-link'),
   backupDownloadBtn: document.getElementById('backup-download-btn'),
@@ -2072,6 +2079,44 @@ function selectedZip(event) {
   return null;
 }
 
+function renderAuthHealth(health) {
+  const active = Boolean(health?.hasRefreshToken) && health?.isAuthenticated !== false;
+  if (els.authHealthBadge) {
+    els.authHealthBadge.variant = 'filled';
+    els.authHealthBadge.color = active ? 'success' : 'danger';
+    els.authHealthBadge.textContent = active ? 'Actief' : 'Her-authenticatie vereist';
+  }
+  if (els.authExpiry) {
+    const expiry = health?.accessTokenExpiresAt ? formatLocalTimestamp(new Date(health.accessTokenExpiresAt)) : 'nog niet ververst';
+    els.authExpiry.textContent = `Access token verloopt: ${expiry}`;
+  }
+  if (els.authRefreshUpdated) {
+    const updated = health?.refreshTokenLastUpdated ? formatLocalTimestamp(new Date(health.refreshTokenLastUpdated)) : 'nog niet opgeslagen';
+    els.authRefreshUpdated.textContent = `Refresh token bijgewerkt: ${updated}`;
+  }
+}
+
+function renderDiagnostics(report) {
+  const hosts = (report?.hosts || []).map((host) => {
+    const dns = host.dnsResolved ? 'DNS ok' : 'DNS mislukt';
+    const reach = host.reachable ? host.detail : (host.detail || 'niet bereikbaar');
+    return `${host.host}: ${dns}. ${reach}`;
+  });
+  const storage = report?.storageDetail || 'Opslagstatus onbekend.';
+  if (els.authDiagAlert) {
+    const healthy = (report?.hosts || []).every((host) => host.dnsResolved && host.reachable)
+      && report?.dataDirectoryWritable
+      && report?.databaseWritable;
+    els.authDiagAlert.hidden = false;
+    els.authDiagAlert.variant = healthy ? 'success' : 'warning';
+    els.authDiagAlert.alertDescription = [...hosts, storage].join(' ');
+  }
+}
+
+async function loadAuthHealth() {
+  renderAuthHealth(await api('/api/system/auth'));
+}
+
 async function loadLanAccess() {
   const info = await api('/api/system/network');
   const urls = Array.isArray(info.urls) && info.urls.length ? info.urls : [info.localUrl || 'http://localhost:5000'];
@@ -2144,6 +2189,20 @@ if (els.restoreDropzone) {
     state.restoreFile = selectedZip(event);
   });
 }
+bindButton(els.authLoginBtn, startLogin);
+bindButton(els.authRefreshBtn, async () => {
+  const result = await api('/api/system/auth/refresh', { method: 'POST' });
+  if (result.health) {
+    renderAuthHealth(result.health);
+  }
+  if (result.success === false) {
+    throw new Error(result.error || 'Tokenverversing mislukt.');
+  }
+  showAlert('success', 'Access token is ververst.');
+});
+bindButton(els.authDiagBtn, async () => {
+  renderDiagnostics(await api('/api/system/diagnostics', { method: 'POST' }));
+});
 bindButton(els.backupDownloadBtn, downloadBackup);
 bindButton(els.restoreBtn, () => {
   if (!state.restoreFile) {
@@ -2164,6 +2223,7 @@ try {
   await loadConfig();
   try {
     await loadLanAccess();
+    await loadAuthHealth();
   } catch (error) {
     showAlert('error', error.message);
   }

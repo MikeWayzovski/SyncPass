@@ -11,11 +11,26 @@ public interface ITrimbleAuthService
 {
     bool HasRefreshToken { get; }
 
+    TokenHealth DescribeHealth();
+
     Task<string> GetAccessTokenAsync(CancellationToken cancellationToken);
+
+    Task ForceTokenRefreshAsync(CancellationToken cancellationToken);
 
     void StoreRefreshToken(string refreshToken, string? accessToken = null, int expiresIn = 0);
 
     void ReloadPersistedCredentials();
+}
+
+public sealed class TokenHealth
+{
+    public bool IsAuthenticated { get; init; }
+
+    public DateTimeOffset? AccessTokenExpiresAt { get; init; }
+
+    public bool HasRefreshToken { get; init; }
+
+    public DateTimeOffset? RefreshTokenLastUpdated { get; init; }
 }
 
 /// <summary>
@@ -36,6 +51,7 @@ public sealed class TrimbleAuthService : ITrimbleAuthService
     private string? _accessToken;
     private DateTimeOffset _expiresAt = DateTimeOffset.MinValue;
     private string? _refreshToken;
+    private bool _refreshRejected;
 
     public TrimbleAuthService(
         IHttpClientFactory httpClientFactory,
@@ -52,6 +68,43 @@ public sealed class TrimbleAuthService : ITrimbleAuthService
 
     public bool HasRefreshToken => !string.IsNullOrWhiteSpace(_refreshToken);
 
+    public TokenHealth DescribeHealth()
+    {
+        DateTimeOffset? updated = null;
+        var path = RefreshTokenPath;
+        if (File.Exists(path))
+        {
+            var written = File.GetLastWriteTimeUtc(path);
+            if (written.Year > 2000)
+            {
+                updated = new DateTimeOffset(DateTime.SpecifyKind(written, DateTimeKind.Utc)).ToLocalTime();
+            }
+        }
+
+        return new TokenHealth
+        {
+            IsAuthenticated = HasRefreshToken && !_refreshRejected,
+            AccessTokenExpiresAt = _expiresAt > DateTimeOffset.MinValue ? _expiresAt.ToLocalTime() : null,
+            HasRefreshToken = HasRefreshToken,
+            RefreshTokenLastUpdated = updated
+        };
+    }
+
+    public async Task ForceTokenRefreshAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _accessToken = null;
+            _expiresAt = DateTimeOffset.MinValue;
+            await RefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public void StoreRefreshToken(string refreshToken, string? accessToken = null, int expiresIn = 0)
     {
         if (string.IsNullOrWhiteSpace(refreshToken))
@@ -60,6 +113,7 @@ public sealed class TrimbleAuthService : ITrimbleAuthService
         }
 
         _refreshToken = refreshToken.Trim();
+        _refreshRejected = false;
         PersistRefreshToken(_refreshToken);
 
         if (!string.IsNullOrWhiteSpace(accessToken))
@@ -73,6 +127,7 @@ public sealed class TrimbleAuthService : ITrimbleAuthService
     {
         _accessToken = null;
         _expiresAt = DateTimeOffset.MinValue;
+        _refreshRejected = false;
         _refreshToken = LoadPersistedRefreshToken() ?? _options.CurrentValue.RefreshToken;
         _logger.LogInformation("Reloaded persisted Trimble credentials from disk.");
     }
@@ -138,6 +193,7 @@ public sealed class TrimbleAuthService : ITrimbleAuthService
 
         if (!response.IsSuccessStatusCode)
         {
+            _refreshRejected = true;
             _logger.LogError(
                 "Trimble Identity token refresh failed with {StatusCode}.",
                 (int)response.StatusCode);
@@ -154,6 +210,7 @@ public sealed class TrimbleAuthService : ITrimbleAuthService
 
         _accessToken = token.AccessToken;
         _expiresAt = DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn > 0 ? token.ExpiresIn : 3600);
+        _refreshRejected = false;
 
         if (!string.IsNullOrWhiteSpace(token.RefreshToken))
         {

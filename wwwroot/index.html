@@ -18,7 +18,7 @@
         <div class="app-header-copy">
           <modus-wc-typography size="lg" hierarchy="h1">Trimble Connector</modus-wc-typography>
           <modus-wc-typography size="sm">
-            Account-dashboard voor padgebaseerde synchronisatie. <span id="app-version">v2.5.5</span>
+            Account-dashboard voor padgebaseerde synchronisatie. <span id="app-version">v2.6.0</span>
           </modus-wc-typography>
         </div>
         <div class="app-header-end">
@@ -521,6 +521,32 @@
         </div>
 
         <div slot="tab-6" class="wizard-stack" role="tabpanel" aria-label="Systeem en backup">
+          <modus-wc-card id="auth-health-card" bordered padding="compact">
+            <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Systeemstatus &amp; authenticatie</modus-wc-typography>
+            <div class="step-body">
+              <div class="status-row">
+                <modus-wc-badge id="auth-health-badge" size="sm" variant="filled" color="danger">Her-authenticatie vereist</modus-wc-badge>
+              </div>
+              <modus-wc-typography id="auth-expiry" size="sm">Access token verloopt: nog niet ververst</modus-wc-typography>
+              <modus-wc-typography id="auth-refresh-updated" size="sm">Refresh token bijgewerkt: nog niet opgeslagen</modus-wc-typography>
+              <modus-wc-alert id="auth-diag-alert" variant="info" hidden></modus-wc-alert>
+              <div class="action-row">
+                <modus-wc-button id="auth-diag-btn" size="sm" color="tertiary" variant="outlined">
+                  <modus-wc-icon name="language" size="xs" decorative></modus-wc-icon>
+                  Netwerkcontrole
+                </modus-wc-button>
+                <modus-wc-button id="auth-refresh-btn" size="sm" color="tertiary" variant="outlined">
+                  <modus-wc-icon name="sync" size="xs" decorative></modus-wc-icon>
+                  Test tokenverversing
+                </modus-wc-button>
+                <modus-wc-button id="auth-login-btn" size="sm" color="primary" variant="filled">
+                  <modus-wc-icon name="person" size="xs" decorative></modus-wc-icon>
+                  Opnieuw inloggen
+                </modus-wc-button>
+              </div>
+            </div>
+          </modus-wc-card>
+
           <modus-wc-card id="lan-card" bordered padding="compact">
             <modus-wc-typography slot="title" hierarchy="h2" size="md" weight="semibold">Systeem &amp; backup</modus-wc-typography>
             <div class="step-body">

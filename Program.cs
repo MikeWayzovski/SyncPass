@@ -76,6 +76,7 @@ IHost host = builder
         services.AddSingleton<SyncInventoryService>();
         services.AddSingleton<SyncEngine>();
         services.AddSingleton<SetupApi>();
+        services.AddSingleton<SystemHealthService>();
         services.AddSingleton<SystemEndpoints>();
         services.AddSingleton(new DashboardListenState
         {
